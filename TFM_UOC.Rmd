@@ -11,4 +11,4 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ## TFM description
 
-Trabajo de final de máster de Juan.
+Trabajo de final de máster UOC
