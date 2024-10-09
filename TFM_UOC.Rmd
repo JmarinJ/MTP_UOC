@@ -1,5 +1,7 @@
 ---
-title: "TFM_UOC"
+title: "Deciphering the immune dynamics according to homologous recombination status
+in advanced ovarian cancer patients treated with neoadjuvant chemotherapy"
+subtitle: "Master's thesis program" 
 author: "Juan A. Marín Jiménez"
 date: "`r Sys.Date()`"
 output: html_document
@@ -9,6 +11,135 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-## TFM description
+# R update and Seurat package installation
 
-Trabajo de final de máster UOC
+I followed installation instructions for Seurat_v5 at https://satijalab.org/seurat/articles/install_v5.html but needed to reinstall a 
+lot of dependencies before
+
+```{r}
+if(0){
+# R update needed
+# Save packages
+tmp <- installed.packages()
+installedpkgs <- as.vector(tmp[is.na(tmp[,"Priority"]), 1])
+save(installedpkgs, file="installed_old.rda")
+# Install R here
+# Recover packages
+load("installed_old.rda")
+tmp <- installed.packages()
+installedpkgs.new <- as.vector(tmp[is.na(tmp[,"Priority"]), 1])
+missing <- setdiff(installedpkgs, installedpkgs.new)
+install.packages(missing)
+update.packages()
+
+# Seurat installation
+install.packages('Seurat')
+
+# Other recommended packages
+setRepositories(ind = 1:3, addURLs = c('https://satijalab.r-universe.dev', 'https://bnprks.r-universe.dev/'))
+install.packages(c("BPCells", "presto", "glmGamPoi"))
+
+# Install the remotes package
+if (!requireNamespace("remotes", quietly = TRUE)) {
+  install.packages("remotes")
+}
+install.packages('Signac')
+remotes::install_github("satijalab/seurat-data", quiet = TRUE)
+remotes::install_github("satijalab/azimuth", quiet = TRUE)
+remotes::install_github("satijalab/seurat-wrappers", quiet = TRUE)
+}
+```
+
+# Needed libraries
+
+```{r}
+if(1){
+library(Seurat)
+library(tidyverse)
+library(ggplot2)
+library(patchwork)
+}
+```
+
+# GSE dataset download
+
+Due to lack of memory, I will manually download all the files
+
+```{r}
+if(0){
+# Install GEOquery
+if (!requireNamespace("GEOquery", quietly = TRUE)) {
+    install.packages("GEOquery")
+}
+library(GEOquery)
+# Dataset: Zhang_2022
+# gse_id <- "GSE165897"
+# gse_data <- getGEO(gse_id, GSEMatrix = TRUE)
+# gse_info <- getGEOSuppFiles(gse_id)
+}
+```
+
+# Seurat object creation
+
+```{r}
+if(0){
+# metadata
+cell_info <- data.table::fread("GSE165897/GSE165897_cellInfo_HGSOC.tsv.gz") %>% 
+  column_to_rownames(var = 'cell')
+
+# exploring cell metadata and annotation categories
+cbind(table(cell_info$cell_subtype))
+table(cell_info$cell_subtype, cell_info$cell_type)
+
+# count matrix
+umi_counts <- data.table::fread("GSE165897/GSE165897_UMIcounts_HGSOC.tsv.gz") %>% 
+  column_to_rownames(var = 'V1')
+# umi_counts[1:3,1:3]
+# umi_counts_HOLD <- umi_counts
+
+# Create my Seurat object
+# seu_zhang_22 <- CreateSeuratObject(counts=umi_counts, meta.data=cell_info)
+# mem.maxVSize()
+# Imposible to create seurat object due to vector memory limit of 16Gb
+
+# I split the matrix in 5000 colums fragments and put them in a list
+seu_zhang_22 <- list()
+for (i in 1:11){
+  a1 <- i*5000-4999
+  a2 <- i*5000
+  if(i==11){
+    a2 <- ncol(umi_counts)
+  }
+  umi_frag <- umi_counts[,a1:a2]
+  cell_frag<- cell_info[colnames(umi_frag),]
+  print(all(rownames(cell_frag)==colnames(umi_frag)))
+  tmp <- CreateSeuratObject(counts=umi_frag, meta.data=cell_frag)
+  seu_zhang_22[[i]] <- tmp
+  tmp <- NULL
+}
+seu_zhang_22
+
+# Merging all the elements from seu_zhang_22
+seurat_zhang_22 <- seu_zhang_22[[1]]
+for (i in 2:length(seu_zhang_22)){
+  seurat_zhang_22 <- merge(seurat_zhang_22, seu_zhang_22[[i]])
+}
+seurat_zhang_22
+Layers(seurat_zhang_22)
+
+# Need to fuse all the generated layers using JoinLayers
+seurat_zhang_22[["RNA"]] <- JoinLayers(seurat_zhang_22[["RNA"]])
+seurat_zhang_22
+Layers(seurat_zhang_22)
+}
+```
+
+# Seurat object analysis
+
+The objective is to develop an script to get a QC report of every Seurat object
+created for the project
+
+```{r}
+seurat_zhang_22[["RNA"]]$counts[1:5,1:5]
+```
+
