@@ -139,7 +139,132 @@ Layers(seurat_zhang_22)
 The objective is to develop an script to get a QC report of every Seurat object
 created for the project
 
+Parameters:
+- nCount_RNA
+- nFeature_RNA
+- perc.mt
+- perc.ribo
+- perc.hem
+- perc.plat
+
 ```{r}
-seurat_zhang_22[["RNA"]]$counts[1:5,1:5]
+
+seurat <- seurat_zhang_22
+head(seurat@meta.data, 10)
+colnames(seurat@meta.data)
+
+# mitochondrial read content per cell
+seurat[["perc.mt"]] <- PercentageFeatureSet(seurat, pattern = "^MT-")
+# ribosomal read content per cell
+seurat[["perc.ribo"]] <- PercentageFeatureSet(seurat, pattern = "RB[SL]")
+# hemoglobin genes - includes all genes starting with HB except HBP.
+seurat[["perc.hem"]] <- PercentageFeatureSet(seurat, pattern = "^HB[^(P|E|S)]")
+# platelet markers
+seurat[["perc.plat"]] <- PercentageFeatureSet(seurat, pattern = "PECAM1|PF4")
+
+# ploting QC metrics as violin plots
+qc_features <- c("nCount_RNA", "nFeature_RNA", "perc.mt", "perc.ribo", "perc.hem", "perc.plat")
+# Complete dataset
+VlnPlot(seurat, features = qc_features, ncol = 6)
+# By samples
+VlnPlot(seurat, 
+        group.by = "patient_id", 
+        split.by = "treatment_phase", 
+        features = "perc.mt", 
+        pt.size = 0.1)
+
+# FeatureScatter to visualize feature-feature relationships
+plot1 <- FeatureScatter(seurat, feature1 = "nCount_RNA", feature2 = "perc.mt")
+plot2 <- FeatureScatter(seurat, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
+CombinePlots(plots = list(plot1, plot2))
+
+
+
+```
+# Filter cells
+
+NEED TO CONSENSUATE CRITERIA
+
+```{r}
+
+```
+
+# Dataset individual processing
+
+Satija's lab pipeline
+
+```{r}
+# Normalize
+seurat <- NormalizeData(seurat, normalization.method = "LogNormalize", scale.factor = 10000)
+# Find most variable genes
+seurat <- FindVariableFeatures(seurat)
+# Scale regressing the mitochondrial content
+seurat <- ScaleData(seurat, vars.to.regress = "perc.mt")
+# Run PCA
+seurat <- RunPCA(seurat, npcs = 100, ndims.print = 1:5, nfeatures.print = 5)
+ElbowPlot(seurat, ndims = 100)
+# Selecting the 30 first PC for tSNE and UMAP clustering
+ncomp<-30
+seurat<-FindNeighbors(seurat, reduction = "pca", dims = 1:ncomp, nn.eps = 0.5)
+# kNN graph and clustering at several resolutions
+for(i in c(seq(0.1,1,0.1), 1.5, 2, 2.5, 3, 5, 10)) {
+  seurat<-FindClusters(seurat, resolution = i, n.start=10)
+}
+# seurat<-RunTSNE(seurat, dims= 1:ncomp, tsne.method = "Rtsne", nthreads=16, max_iter=2000, check_duplicates = FALSE)
+seurat <- RunUMAP(seurat, dims = 1:ncomp, min.dist = 0.75)
+```
+# UMAP
+
+```{r}
+p1 <- DimPlot(seurat, reduction = "umap", group.by = "patient_id", label = T, label.box = T)
+p2 <- DimPlot(seurat, reduction = "umap", group.by = "treatment_phase", label = T, label.box = T)
+p1|p2
+```
+
+# Data annotation
+
+Try automated annotation using Azimuth
+
+```{r annotation, fig.width=10, fig.height=8}
+if(0){
+length_subset<-50
+cells_no<-nrow(seurat@meta.data)
+subset<-list()
+x <- round(cells_no/length_subset)
+remaining<-1:cells_no
+order<-c()
+for (i in 1:length_subset) {
+  if(i != length_subset) {
+    subset[[i]]<-sample(remaining, x, replace=F)
+    remaining<-remaining[-which(remaining %in% subset[[i]])]
+    order<-c(order, subset[[i]])
+  }
+  if(i == length_subset) {
+    subset[[i]]<-remaining
+    order<-c(order, subset[[i]])
+  }
+}
+seurat$Azimuth_CT_1<-NA
+seurat$Azimuth_CT_2<-NA
+seurat$Azimuth_CT_3<-NA
+
+for (i in 1:length(subset)){
+  seurat_tmp<-subset(seurat, cells=names(seurat$orig.ident)[subset[[i]]])
+  seurat_tmp<-RunAzimuth(seurat_tmp, reference = "pbmcref")
+  
+  p <- intersect(names(seurat_tmp$orig.ident), names(seurat$orig.ident))
+  seurat$Azimuth_CT_1[match(p,names(seurat$orig.ident))] <- seurat_tmp$predicted.celltype.l1[match(p,names(seurat_tmp$orig.ident))]
+  seurat$Azimuth_CT_2[match(p,names(seurat$orig.ident))] <- seurat_tmp$predicted.celltype.l2[match(p,names(seurat_tmp$orig.ident))]
+  seurat$Azimuth_CT_3[match(p,names(seurat$orig.ident))] <- seurat_tmp$predicted.celltype.l3[match(p,names(seurat_tmp$orig.ident))]
+  rm(seurat_tmp);invisible(gc())
+  print(i)
+}
+
+
+
+}
+
+
+
 ```
 
