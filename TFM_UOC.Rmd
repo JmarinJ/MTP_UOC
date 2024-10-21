@@ -9,6 +9,7 @@ output: html_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+setwd("/Users/juana.marinjimenez/Documents/TFM")
 ```
 
 # R update and Seurat package installation
@@ -18,35 +19,35 @@ lot of dependencies before
 
 ```{r}
 if(0){
-# R update needed
-# Save packages
-tmp <- installed.packages()
-installedpkgs <- as.vector(tmp[is.na(tmp[,"Priority"]), 1])
-save(installedpkgs, file="installed_old.rda")
-# Install R here
-# Recover packages
-load("installed_old.rda")
-tmp <- installed.packages()
-installedpkgs.new <- as.vector(tmp[is.na(tmp[,"Priority"]), 1])
-missing <- setdiff(installedpkgs, installedpkgs.new)
-install.packages(missing)
-update.packages()
-
-# Seurat installation
-install.packages('Seurat')
-
-# Other recommended packages
-setRepositories(ind = 1:3, addURLs = c('https://satijalab.r-universe.dev', 'https://bnprks.r-universe.dev/'))
-install.packages(c("BPCells", "presto", "glmGamPoi"))
-
-# Install the remotes package
-if (!requireNamespace("remotes", quietly = TRUE)) {
-  install.packages("remotes")
-}
-install.packages('Signac')
-remotes::install_github("satijalab/seurat-data", quiet = TRUE)
-remotes::install_github("satijalab/azimuth", quiet = TRUE)
-remotes::install_github("satijalab/seurat-wrappers", quiet = TRUE)
+  # R update needed
+  # Save packages
+  tmp <- installed.packages()
+  installedpkgs <- as.vector(tmp[is.na(tmp[,"Priority"]), 1])
+  save(installedpkgs, file="installed_old.rda")
+  # Install R here
+  # Recover packages
+  load("installed_old.rda")
+  tmp <- installed.packages()
+  installedpkgs.new <- as.vector(tmp[is.na(tmp[,"Priority"]), 1])
+  missing <- setdiff(installedpkgs, installedpkgs.new)
+  install.packages(missing)
+  update.packages()
+  
+  # Seurat installation
+  install.packages('Seurat')
+  
+  # Other recommended packages
+  setRepositories(ind = 1:3, addURLs = c('https://satijalab.r-universe.dev', 'https://bnprks.r-universe.dev/'))
+  install.packages(c("BPCells", "presto", "glmGamPoi"))
+  
+  # Install the remotes package
+  if (!requireNamespace("remotes", quietly = TRUE)) {
+    install.packages("remotes")
+  }
+  install.packages('Signac')
+  remotes::install_github("satijalab/seurat-data", quiet = TRUE)
+  remotes::install_github("satijalab/azimuth", quiet = TRUE)
+  remotes::install_github("satijalab/seurat-wrappers", quiet = TRUE)
 }
 ```
 
@@ -54,10 +55,10 @@ remotes::install_github("satijalab/seurat-wrappers", quiet = TRUE)
 
 ```{r}
 if(1){
-library(Seurat)
-library(tidyverse)
-library(ggplot2)
-library(patchwork)
+  library(Seurat)
+  library(tidyverse)
+  library(ggplot2)
+  library(patchwork)
 }
 ```
 
@@ -67,15 +68,15 @@ Due to lack of memory, I will manually download all the files
 
 ```{r}
 if(0){
-# Install GEOquery
-if (!requireNamespace("GEOquery", quietly = TRUE)) {
+  # Install GEOquery
+  if (!requireNamespace("GEOquery", quietly = TRUE)) {
     install.packages("GEOquery")
-}
-library(GEOquery)
-# Dataset: Zhang_2022
-# gse_id <- "GSE165897"
-# gse_data <- getGEO(gse_id, GSEMatrix = TRUE)
-# gse_info <- getGEOSuppFiles(gse_id)
+  }
+  library(GEOquery)
+  # Dataset: Zhang_2022
+  # gse_id <- "GSE165897"
+  # gse_data <- getGEO(gse_id, GSEMatrix = TRUE)
+  # gse_info <- getGEOSuppFiles(gse_id)
 }
 ```
 
@@ -83,54 +84,56 @@ library(GEOquery)
 
 ```{r}
 if(0){
-# metadata
-cell_info <- data.table::fread("GSE165897/GSE165897_cellInfo_HGSOC.tsv.gz") %>% 
-  column_to_rownames(var = 'cell')
-
-# exploring cell metadata and annotation categories
-cbind(table(cell_info$cell_subtype))
-table(cell_info$cell_subtype, cell_info$cell_type)
-
-# count matrix
-umi_counts <- data.table::fread("GSE165897/GSE165897_UMIcounts_HGSOC.tsv.gz") %>% 
-  column_to_rownames(var = 'V1')
-# umi_counts[1:3,1:3]
-# umi_counts_HOLD <- umi_counts
-
-# Create my Seurat object
-# seu_zhang_22 <- CreateSeuratObject(counts=umi_counts, meta.data=cell_info)
-# mem.maxVSize()
-# Imposible to create seurat object due to vector memory limit of 16Gb
-
-# I split the matrix in 5000 colums fragments and put them in a list
-seu_zhang_22 <- list()
-for (i in 1:11){
-  a1 <- i*5000-4999
-  a2 <- i*5000
-  if(i==11){
-    a2 <- ncol(umi_counts)
+  # metadata
+  cell_info <- data.table::fread("GSE165897/GSE165897_cellInfo_HGSOC.tsv.gz") %>% 
+    column_to_rownames(var = 'cell')
+  
+  # exploring cell metadata and annotation categories
+  cbind(table(cell_info$cell_subtype))
+  table(cell_info$cell_subtype, cell_info$cell_type)
+  
+  # count matrix
+  umi_counts <- data.table::fread("GSE165897/GSE165897_UMIcounts_HGSOC.tsv.gz") %>% 
+    column_to_rownames(var = 'V1')
+  # umi_counts[1:3,1:3]
+  # umi_counts_HOLD <- umi_counts
+  
+  # Create my Seurat object
+  # seu_zhang_22 <- CreateSeuratObject(counts=umi_counts, meta.data=cell_info)
+  # mem.maxVSize()
+  # Imposible to create seurat object due to vector memory limit of 16Gb
+  
+  # I split the matrix in 5000 colums fragments and put them in a list
+  seu_zhang_22 <- list()
+  for (i in 1:11){
+    a1 <- i*5000-4999
+    a2 <- i*5000
+    if(i==11){
+      a2 <- ncol(umi_counts)
+    }
+    umi_frag <- umi_counts[,a1:a2]
+    cell_frag<- cell_info[colnames(umi_frag),]
+    print(all(rownames(cell_frag)==colnames(umi_frag)))
+    tmp <- CreateSeuratObject(counts=umi_frag, meta.data=cell_frag)
+    seu_zhang_22[[i]] <- tmp
+    tmp <- NULL
   }
-  umi_frag <- umi_counts[,a1:a2]
-  cell_frag<- cell_info[colnames(umi_frag),]
-  print(all(rownames(cell_frag)==colnames(umi_frag)))
-  tmp <- CreateSeuratObject(counts=umi_frag, meta.data=cell_frag)
-  seu_zhang_22[[i]] <- tmp
-  tmp <- NULL
-}
-seu_zhang_22
 
-# Merging all the elements from seu_zhang_22
-seurat_zhang_22 <- seu_zhang_22[[1]]
-for (i in 2:length(seu_zhang_22)){
-  seurat_zhang_22 <- merge(seurat_zhang_22, seu_zhang_22[[i]])
-}
-seurat_zhang_22
-Layers(seurat_zhang_22)
-
-# Need to fuse all the generated layers using JoinLayers
-seurat_zhang_22[["RNA"]] <- JoinLayers(seurat_zhang_22[["RNA"]])
-seurat_zhang_22
-Layers(seurat_zhang_22)
+  # Merging all the elements from seu_zhang_22
+  seurat_zhang_22 <- seu_zhang_22[[1]]
+  for (i in 2:length(seu_zhang_22)){
+    seurat_zhang_22 <- merge(seurat_zhang_22, seu_zhang_22[[i]])
+  }
+  seurat_zhang_22
+  Layers(seurat_zhang_22)
+  
+  # Need to fuse all the generated layers using JoinLayers
+  seurat_zhang_22[["RNA"]] <- JoinLayers(seurat_zhang_22[["RNA"]])
+  seurat_zhang_22
+  Layers(seurat_zhang_22)
+  
+  # Save seurat object
+  #saveRDS(seurat_zhang_22, file="./Seurat/GSE165897_seurat_raw")
 }
 ```
 
@@ -148,45 +151,54 @@ Parameters:
 - perc.plat
 
 ```{r}
-
-seurat <- seurat_zhang_22
-head(seurat@meta.data, 10)
-colnames(seurat@meta.data)
-
-# mitochondrial read content per cell
-seurat[["perc.mt"]] <- PercentageFeatureSet(seurat, pattern = "^MT-")
-# ribosomal read content per cell
-seurat[["perc.ribo"]] <- PercentageFeatureSet(seurat, pattern = "RB[SL]")
-# hemoglobin genes - includes all genes starting with HB except HBP.
-seurat[["perc.hem"]] <- PercentageFeatureSet(seurat, pattern = "^HB[^(P|E|S)]")
-# platelet markers
-seurat[["perc.plat"]] <- PercentageFeatureSet(seurat, pattern = "PECAM1|PF4")
-
-# ploting QC metrics as violin plots
-qc_features <- c("nCount_RNA", "nFeature_RNA", "perc.mt", "perc.ribo", "perc.hem", "perc.plat")
-# Complete dataset
-VlnPlot(seurat, features = qc_features, ncol = 6)
-# By samples
-VlnPlot(seurat, 
-        group.by = "patient_id", 
-        split.by = "treatment_phase", 
-        features = "perc.mt", 
-        pt.size = 0.1)
-
-# FeatureScatter to visualize feature-feature relationships
-plot1 <- FeatureScatter(seurat, feature1 = "nCount_RNA", feature2 = "perc.mt")
-plot2 <- FeatureScatter(seurat, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
-CombinePlots(plots = list(plot1, plot2))
-
-
-
+if(0){
+  gc()
+  seurat <- readRDS("Seurat/GSE165897_seurat_raw.rds")
+  head(seurat@meta.data, 10)
+  colnames(seurat@meta.data)
+  
+  # mitochondrial read content per cell
+  seurat[["perc.mt"]] <- PercentageFeatureSet(seurat, pattern = "^MT-")
+  # ribosomal read content per cell
+  seurat[["perc.ribo"]] <- PercentageFeatureSet(seurat, pattern = "RB[SL]")
+  # hemoglobin genes - includes all genes starting with HB except HBP.
+  seurat[["perc.hem"]] <- PercentageFeatureSet(seurat, pattern = "^HB[^(P|E|S)]")
+  # platelet markers
+  seurat[["perc.plat"]] <- PercentageFeatureSet(seurat, pattern = "PECAM1|PF4")
+  
+  # ploting QC metrics as violin plots
+  qc_features <- c("nCount_RNA", "nFeature_RNA", "perc.mt", "perc.ribo", "perc.hem", "perc.plat")
+  # Complete dataset
+  VlnPlot(seurat, features = qc_features, ncol = 6)
+  # By samples
+  VlnPlot(seurat, 
+          group.by = "patient_id", 
+          split.by = "treatment_phase", 
+          features = "perc.mt", 
+          pt.size = 0.1)
+  
+  # FeatureScatter to visualize feature-feature relationships
+  plot1 <- FeatureScatter(seurat, feature1 = "nCount_RNA", feature2 = "perc.mt")
+  plot2 <- FeatureScatter(seurat, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
+  CombinePlots(plots = list(plot1, plot2))
+}
 ```
 # Filter cells
 
-NEED TO CONSENSUATE CRITERIA
+Need to consensuate criteria. I propose:
+1) Apply this to CreateSeuratObject()
+min.cells = 10 # Include features detected in at least 10 cells.
+min.features = 100 # Include cells where at least 100 features are detected
+2) Subset the seurat:
+seurat_object <- subset(seurat_object, subset = nFeature_RNA > 100) [...]
+
+Filter by mitocondrial content - it seems like some filtering has been already applied
 
 ```{r}
-
+if(0){
+  #filters
+  saveRDS(seurat, file="./Seurat/GSE165897_seurat_filtered.rds")
+}
 ```
 
 # Dataset individual processing
@@ -194,77 +206,118 @@ NEED TO CONSENSUATE CRITERIA
 Satija's lab pipeline
 
 ```{r}
-# Normalize
-seurat <- NormalizeData(seurat, normalization.method = "LogNormalize", scale.factor = 10000)
-# Find most variable genes
-seurat <- FindVariableFeatures(seurat)
-# Scale regressing the mitochondrial content
-seurat <- ScaleData(seurat, vars.to.regress = "perc.mt")
-# Run PCA
-seurat <- RunPCA(seurat, npcs = 100, ndims.print = 1:5, nfeatures.print = 5)
-ElbowPlot(seurat, ndims = 100)
-# Selecting the 30 first PC for tSNE and UMAP clustering
-ncomp<-30
-seurat<-FindNeighbors(seurat, reduction = "pca", dims = 1:ncomp, nn.eps = 0.5)
-# kNN graph and clustering at several resolutions
-for(i in c(seq(0.1,1,0.1), 1.5, 2, 2.5, 3, 5, 10)) {
-  seurat<-FindClusters(seurat, resolution = i, n.start=10)
+if(0){
+  seurat <- readRDS("./Seurat/GSE165897_seurat_filtered.rds")
+  # Normalize
+  seurat <- NormalizeData(seurat, normalization.method = "LogNormalize", scale.factor = 10000)
+  # Find most variable genes
+  seurat <- FindVariableFeatures(seurat)
+  # Scale regressing the mitochondrial content
+  seurat <- ScaleData(seurat, vars.to.regress = "perc.mt")
+  # Run PCA
+  seurat <- RunPCA(seurat, npcs = 100, ndims.print = 1:5, nfeatures.print = 5)
+  ElbowPlot(seurat, ndims = 100)
+  # Selecting the 30 first PC for tSNE and UMAP clustering
+  ncomp<-30
+  seurat<-FindNeighbors(seurat, reduction = "pca", dims = 1:ncomp, nn.eps = 0.5)
+  # kNN graph and clustering at several resolutions
+  for(i in c(seq(0.1,1,0.1), 1.5, 2, 2.5, 3, 5, 10)) {
+    seurat<-FindClusters(seurat, resolution = i, n.start=10)
+  }
+  # seurat<-RunTSNE(seurat, dims= 1:ncomp, tsne.method = "Rtsne", nthreads=16, 
+  # max_iter=2000, check_duplicates = FALSE)
+  seurat <- RunUMAP(seurat, dims = 1:ncomp, min.dist = 0.75)
+  saveRDS(seurat, file = "Seurat/GSE165897_seurat_norm.rds")
 }
-# seurat<-RunTSNE(seurat, dims= 1:ncomp, tsne.method = "Rtsne", nthreads=16, max_iter=2000, check_duplicates = FALSE)
-seurat <- RunUMAP(seurat, dims = 1:ncomp, min.dist = 0.75)
 ```
 # UMAP
 
 ```{r}
-p1 <- DimPlot(seurat, reduction = "umap", group.by = "patient_id", label = T, label.box = T)
-p2 <- DimPlot(seurat, reduction = "umap", group.by = "treatment_phase", label = T, label.box = T)
+seurat <- readRDS("Seurat/GSE165897_seurat_norm.rds")
+p1 <- DimPlot(seurat, reduction = "umap", group.by = "patient_id", label = T, label.box = T) + theme(aspect.ratio=1)
+p2 <- DimPlot(seurat, reduction = "umap", group.by = "treatment_phase", label = T, label.box = T) + theme(aspect.ratio=1)
 p1|p2
 ```
 
 # Data annotation
 
-Try automated annotation using Azimuth
+Try automated annotation using Azimuth from satija's lab
 
 ```{r annotation, fig.width=10, fig.height=8}
-if(0){
-length_subset<-50
-cells_no<-nrow(seurat@meta.data)
-subset<-list()
-x <- round(cells_no/length_subset)
-remaining<-1:cells_no
-order<-c()
-for (i in 1:length_subset) {
-  if(i != length_subset) {
-    subset[[i]]<-sample(remaining, x, replace=F)
-    remaining<-remaining[-which(remaining %in% subset[[i]])]
-    order<-c(order, subset[[i]])
-  }
-  if(i == length_subset) {
-    subset[[i]]<-remaining
-    order<-c(order, subset[[i]])
-  }
+# options(timeout = 1200)
+# BiocManager::install(c("BSgenome.Hsapiens.UCSC.hg38", "EnsDb.Hsapiens.v86", "TFBSTools"))
+# devtools::install_github("satijalab/azimuth", dependencies = TRUE)
+library(Azimuth)
+seurat <- RunAzimuth(seurat, reference = "pbmcref")
+
+# if(0){
+#   length_subset<-50
+#   cells_no<-nrow(seurat@meta.data)
+#   subset<-list()
+#   x <- round(cells_no/length_subset)
+#   remaining<-1:cells_no
+#   order<-c()
+#   for (i in 1:length_subset) {
+#     if(i != length_subset) {
+#       subset[[i]]<-sample(remaining, x, replace=F)
+#       remaining<-remaining[-which(remaining %in% subset[[i]])]
+#       order<-c(order, subset[[i]])
+#     }
+#     if(i == length_subset) {
+#       subset[[i]]<-remaining
+#       order<-c(order, subset[[i]])
+#     }
+#   }
+#   seurat$Azimuth_CT_1<-NA
+#   seurat$Azimuth_CT_2<-NA
+#   seurat$Azimuth_CT_3<-NA
+#   
+#   for (i in 1:length(subset)){
+#     seurat_tmp<-subset(seurat, cells=names(seurat$orig.ident)[subset[[i]]])
+#     seurat_tmp<-RunAzimuth(seurat_tmp, reference = "pbmcref")
+#     
+#     p <- intersect(names(seurat_tmp$orig.ident), names(seurat$orig.ident))
+#     seurat$Azimuth_CT_1[match(p,names(seurat$orig.ident))] <- seurat_tmp$predicted.celltype.l1[match(p,names(seurat_tmp$orig.ident))]
+#     seurat$Azimuth_CT_2[match(p,names(seurat$orig.ident))] <- seurat_tmp$predicted.celltype.l2[match(p,names(seurat_tmp$orig.ident))]
+#     seurat$Azimuth_CT_3[match(p,names(seurat$orig.ident))] <- seurat_tmp$predicted.celltype.l3[match(p,names(seurat_tmp$orig.ident))]
+#     rm(seurat_tmp);invisible(gc())
+#     print(i)
+#   }
+# }
+
+DimPlot(seurat, reduction = "umap", group.by = "predicted.celltype.l1", label = T, label.box = T) + theme(aspect.ratio = 1)
+
+```
+# Dataset integration
+
+```{r}
+table(seurat$patient_id)
+table(seurat$anatomical_location, seurat$treatment_phase)
+if (0) {
+  seurat.list <- SplitObject(seurat, split.by = "patient_id")
+  rm(seurat); invisible(gc())
+  seurat.list <- lapply(seurat.list, FUN = function(x) {
+    x <- NormalizeData(x, verbose = FALSE)
+    x <- FindVariableFeatures(x, verbose = FALSE)
+  })
+  features <- SelectIntegrationFeatures(object.list = seurat.list, nfeatures = 1000)
+  seurat.list <-lapply(seurat.list, FUN = function(x) {
+    x <- ScaleData(x, features = features, verbose = FALSE)
+    x <- RunPCA(x, features = features, verbose = FALSE)
+  })
+  anchors <- FindIntegrationAnchors(object.list = seurat.list, reduction = "rpca", dims = 1:30, anchor.features = features)
+  rm(seurat); invisible(gc())
+  seurat_integrated <- IntegrateData(anchorset = anchors, dim = 1:30, k.weight = 50)
+  rm(anchors); invisible(gc())
+  DefaultAssay(seurat_integrated) <- "integrated"
+  seurat_integrated <- ScaleData(seurat_integrated, verbose = FALSE)
+  seurat_integrated <- RunPCA(seurat_integrated, npcs=100, ndims.print = 1:5, nfeatures.print = 5)
+  seurat_integrated <- FindNeighbors(seurat_integrated, reduction = "pca", dims = 1:75, nn.eps = 0.5)
+  for(i in c(seq(0.1,1,0.1), 1.5, 2, 2.5, 3, 5, 10)) {
+    seurat_integrated<-FindClusters(seurat, resolution = i, n.start=10)}
+  # seurat_integrated <- RunTSNE(seurat_integrated, dims = 1:75, tsne.method = "Rtsne", nthreads = 16, max_iter = 2000, check_duplicates = FALSE)
+  seurat_integrated <- RunUMAP(seurat_integrated)
 }
-seurat$Azimuth_CT_1<-NA
-seurat$Azimuth_CT_2<-NA
-seurat$Azimuth_CT_3<-NA
-
-for (i in 1:length(subset)){
-  seurat_tmp<-subset(seurat, cells=names(seurat$orig.ident)[subset[[i]]])
-  seurat_tmp<-RunAzimuth(seurat_tmp, reference = "pbmcref")
-  
-  p <- intersect(names(seurat_tmp$orig.ident), names(seurat$orig.ident))
-  seurat$Azimuth_CT_1[match(p,names(seurat$orig.ident))] <- seurat_tmp$predicted.celltype.l1[match(p,names(seurat_tmp$orig.ident))]
-  seurat$Azimuth_CT_2[match(p,names(seurat$orig.ident))] <- seurat_tmp$predicted.celltype.l2[match(p,names(seurat_tmp$orig.ident))]
-  seurat$Azimuth_CT_3[match(p,names(seurat$orig.ident))] <- seurat_tmp$predicted.celltype.l3[match(p,names(seurat_tmp$orig.ident))]
-  rm(seurat_tmp);invisible(gc())
-  print(i)
-}
-
-
-
-}
-
-
 
 ```
 
