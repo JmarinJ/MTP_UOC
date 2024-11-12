@@ -187,7 +187,7 @@ Parameters:
 ```{r}
 if(0){
   gc()
-  seurat <- readRDS("Seurat/GSE147082_seurat_raw.rds")
+  seurat <- readRDS("Seurat/GSE165897_seurat_raw.rds")
   head(seurat@meta.data, 10)
   colnames(seurat@meta.data)
   
@@ -206,8 +206,8 @@ if(0){
   VlnPlot(seurat, features = qc_features, ncol = 6)
   # By samples
   VlnPlot(seurat, 
-          # group.by = "patient_id", 
-          # split.by = "treatment_phase", 
+          group.by = "patient_id", 
+          split.by = "treatment_phase", 
           features = "perc.mt", 
           pt.size = 0.1)
   
@@ -242,7 +242,7 @@ Satija's lab pipeline
 ```{r}
 if(0){
   seurat <- readRDS("./Seurat/GSE165897_seurat_filtered.rds")
-  # Normalize
+FD# Normalize
   seurat <- NormalizeData(seurat, normalization.method = "LogNormalize", scale.factor = 10000)
   # Find most variable genes
   seurat <- FindVariableFeatures(seurat)
@@ -268,11 +268,12 @@ if(0){
 
 ```{r}
 seurat <- readRDS("Seurat/GSE165897_seurat_norm.rds")
+seurat@meta.data
 p1 <- DimPlot(seurat, reduction = "umap", 
-              group.by = "orig.ident", 
+              group.by = "patient_id", 
               label = T, label.box = T) + theme(aspect.ratio=1)
 p2 <- DimPlot(seurat, reduction = "umap", 
-              # group.by = "treatment_phase", 
+              group.by = "treatment_phase", 
               label = T, label.box = T) + theme(aspect.ratio=1)
 p1|p2
 ```
