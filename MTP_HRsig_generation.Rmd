@@ -1,0 +1,887 @@
+---
+title: "MTP - HR signatures generation"
+output: html_document
+date: "2025-01-09"
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+  library(R.utils)
+  library(Seurat)
+  library(tidyverse)
+  library(ggplot2)
+  library(patchwork)
+  library(HGNChelper)
+  # install.packages("ggpubr")
+  library(ggpubr)
+  # install.packages("RCurl")
+  library(RCurl)
+  library(AnnotationHub)
+  library(ensembldb)
+  # BiocManager::install("DESeq2")
+  library(DESeq2)
+  library(glmGamPoi)
+  # BiocManager::install("EnhancedVolcano")
+  library(EnhancedVolcano)
+  # devtools::install_github("immunogenomics/presto")
+  library(presto)
+  library(SummarizedExperiment)
+  # install.packages("ggVennDiagram")
+  library(ggVennDiagram)
+```
+
+Script to generate HR signatures from a scRNAseq dataset
+
+## Luo, 2024 - Dataset GSE222556
+
+### Dataset preparation
+
+Variables of interest for this data set are:
+- Patient code: "patient"
+- Sample code: "Sample"
+- Cell type code: "Major.cell.type"
+
+```{r}
+# Define seurat object of origin: Luo, 2024 - GSE222556
+luo_seu <- readRDS("~/GSE222556_processed.rds")
+
+head(luo_seu@meta.data)
+colnames(luo_seu@meta.data)
+```
+
+### scRNAseq signatures
+
+#### From DE analysis comparing HRD vs HRP cells
+
+Name: dataset.de
+signature: sigXXX_dataset.de
+
+```{r}
+# DE features between HRD and HRP cells
+Idents(luo_seu) <- "mol"
+luo.de <- FindMarkers(luo_seu, ident.1 = "HRD", ident.2 = "HRP", verbose = TRUE)
+# Head results
+head(luo.de, n = 10)
+# Visualize results
+EnhancedVolcano(luo.de,
+                lab = rownames(luo.de),
+                x = 'avg_log2FC',
+                y = 'p_val_adj')
+
+# Define the signature
+sigHRD_luo.de <- luo.de %>%
+  as.data.frame %>% 
+  arrange(desc(avg_log2FC)) %>% 
+  dplyr::filter(p_val_adj < 0.05 & avg_log2FC > 1) %>%
+  dplyr::filter(pct.1 > 0.1) %>%
+  rownames()
+length(sigHRD_luo.de)
+
+sigHRP_luo.de <- luo.de %>% 
+  as.data.frame %>% 
+  arrange(avg_log2FC) %>% 
+  dplyr::filter(p_val_adj < 0.05 & avg_log2FC < -1) %>%
+  dplyr::filter(pct.2 > 0.1) %>%
+  rownames()
+length(sigHRP_luo.de)
+```
+
+#### From DE analysis comparing HRD vs HRP epithelial only cells
+
+DE: dataset.de.epi
+signature: sigXXX_dataset.de.epi
+
+```{r}
+# DE features between HRD and HRP epithelial cells
+luo_seu$celltype.mol <- paste(luo_seu$Major.cell.type, luo_seu$mol, sep = "_")
+Idents(luo_seu) <- "celltype.mol"
+# ?FindMarkers()
+luo.de.epi <- FindMarkers(luo_seu, 
+                             ident.1 = "Epithelial cell_HRD", 
+                             ident.2 = "Epithelial cell_HRP", 
+                             verbose = TRUE)
+# Head results
+head(luo.de.epi, n = 10)
+# Visualize results
+EnhancedVolcano(luo.de.epi,
+                lab = rownames(luo.de.epi),
+                x = 'avg_log2FC',
+                y = 'p_val_adj')
+# Explore overlap
+length(which(rownames(luo.de) %in% rownames(luo.de.epi)))
+
+# Define the signatures
+sigHRD_luo.de.epi <- luo.de.epi %>%
+  as.data.frame %>% 
+  arrange(desc(avg_log2FC)) %>% 
+  dplyr::filter(p_val_adj < 0.05 & avg_log2FC > 1) %>%
+  dplyr::filter(pct.1 > 0.2) %>%
+  rownames()
+length(sigHRD_luo.de.epi)
+
+sigHRP_luo.de.epi <- luo.de.epi %>% 
+  as.data.frame %>% 
+  arrange(avg_log2FC) %>% 
+  dplyr::filter(p_val_adj < 0.05 & avg_log2FC < -1) %>%
+  dplyr::filter(pct.2 > 0.2) %>%
+  rownames()
+length(sigHRP_luo.de.epi)
+
+```
+
+### Pseudobulk signatures - Satija's
+
+#### From DE comparing HRD vs HRP after grouping by sample
+
+pseudo: dataset.ps.samp
+DE: dataset.ps.samp.de
+sig: sigXXX_dataset.ps.samp.de
+
+```{r}
+# Pseudobulk the counts based on sample
+luo.ps.samp <- AggregateExpression(luo_seu, 
+                                   assays = "RNA", 
+                                   return.seurat = T, 
+                                   group.by = c("mol", "Sample"))
+
+# Each 'cell' is a sample-pseudobulk profile
+tail(Cells(luo.ps.samp))
+
+Idents(luo.ps.samp) <- "mol"
+
+# Perform DE analysis after pseudobulking
+luo.ps.samp.de <- FindMarkers(object = luo.ps.samp, 
+                         ident.1 = "HRD", 
+                         ident.2 = "HRP",
+                         test.use = "DESeq2")
+head(luo.ps.samp.de, n = 10)
+EnhancedVolcano(luo.ps.samp.de,
+                lab = rownames(luo.ps.samp.de),
+                x = 'avg_log2FC',
+                y = 'p_val_adj')
+
+# Define the signatures
+sigHRD_luo.ps.samp.de <- luo.ps.samp.de %>%
+  as.data.frame %>% 
+  arrange(desc(avg_log2FC)) %>% 
+  dplyr::filter(p_val_adj < 0.05 & avg_log2FC > 1) %>%
+  # dplyr::filter(pct.1 > 0.1) %>%
+  rownames()
+length(sigHRD_luo.ps.samp.de)
+
+sigHRP_luo.ps.samp.de <- luo.ps.samp.de %>% 
+  as.data.frame %>% 
+  arrange(avg_log2FC) %>% 
+  dplyr::filter(p_val_adj < 0.05 & avg_log2FC < -1) %>%
+  # dplyr::filter(pct.2 > 0.1) %>%
+  rownames()
+length(sigHRP_luo.ps.samp.de)
+```
+
+#### From DE comparing HRD vs HRP after grouping by sample and cell type
+
+pseudo: dataset.ps.samp_cell
+DE: dataset.ps.samp_cell.de
+sig: sigXXX_dataset.ps.samp_cell.de
+
+```{r}
+# Pseudobulk the counts based on sample
+luo.ps.samp_cell <- AggregateExpression(luo_seu, 
+                                   assays = "RNA", 
+                                   return.seurat = T, 
+                                   group.by = c("mol", "Sample", "Major.cell.type"))
+
+# Each 'cell' is a sample-pseudobulk profile
+tail(Cells(luo.ps.samp_cell))
+
+luo.ps.samp_cell$cell.mol <- paste(luo.ps.samp_cell$Major.cell.type, luo.ps.samp_cell$mol, sep = "_")
+
+Idents(luo.ps.samp_cell) <- "cell.mol"
+
+# Perform DE analysis after pseudobulking
+luo.ps.samp_cell.de <- FindMarkers(object = luo.ps.samp_cell, 
+                         ident.1 = "Epithelial cell_HRD", 
+                         ident.2 = "Epithelial cell_HRP",
+                         test.use = "DESeq2")
+head(luo.ps.samp_cell.de, n = 10)
+EnhancedVolcano(luo.ps.samp_cell.de,
+                lab = rownames(luo.ps.samp_cell.de),
+                x = 'avg_log2FC',
+                y = 'p_val_adj')
+
+# Define the signatures
+sigHRD_luo.ps.samp_cell.de <- luo.ps.samp_cell.de %>%
+  as.data.frame %>% 
+  arrange(desc(avg_log2FC)) %>% 
+  dplyr::filter(p_val_adj < 0.05 & avg_log2FC > 1) %>%
+  # dplyr::filter(pct.1 > 0.1) %>%
+  rownames()
+length(sigHRD_luo.ps.samp_cell.de)
+
+sigHRP_luo.ps.samp_cell.de <- luo.ps.samp_cell.de %>% 
+  as.data.frame %>% 
+  arrange(avg_log2FC) %>% 
+  dplyr::filter(p_val_adj < 0.05 & avg_log2FC < -1) %>%
+  # dplyr::filter(pct.2 > 0.1) %>%
+  rownames()
+length(sigHRP_luo.ps.samp_cell.de)
+
+```
+
+### Pseudobulk signatures - presto R package
+
+#### From DE comparing HRD vs HRP after grouping by sample
+
+```{r}
+## Create seudobulk matrix
+# Edit argument how to select "mean" or "sum"
+# ?collapse_counts()
+luo_coll.samp<-presto::collapse_counts(counts_mat = luo_seu@assays$RNA@layers$counts, 
+                                        meta_data = luo_seu@meta.data, 
+                                        varnames = c("Sample"), 
+                                        how="sum")
+
+# Add row and col names according to the varnames
+rownames(luo_coll.samp$counts_mat)<-rownames(luo_seu)
+colnames(luo_coll.samp$counts_mat)<-luo_coll.samp$meta_data$Sample
+
+luo_coll.samp$counts_long<-luo_coll.samp$counts_mat %>%
+  as.data.frame() %>%
+  rownames_to_column("Gene") %>%
+  gather(Sample, score, -Gene)
+
+# Add HR status from seurat metadata
+luo_coll.samp$counts_long<-merge(luo_coll.samp$counts_long,
+                                 luo_seu@meta.data %>% dplyr::select(Sample, mol) %>% unique)
+# Filter out "Undetermined" samples
+luo_coll.samp$counts_long<-dplyr::filter(luo_coll.samp$counts_long, mol %in% c("HRD","HRP"))
+
+# perform DESeq2 analysis
+# Create DESeq2 object   
+luo_counts<-luo_coll.samp$counts_long %>% 
+  dplyr::select(Sample, Gene, score) %>% 
+  spread(Sample, score) %>%
+  # pivot_wider(names_from = Sample, values_from = score) %>% 
+  column_to_rownames("Gene") %>% 
+  as.matrix
+luo_colData<-luo_seu@meta.data %>% 
+  dplyr::select(Sample, mol) %>% 
+  unique()
+rownames(luo_colData)<-luo_colData$Sample
+luo_colData<-luo_colData[colnames(luo_counts),]
+# counts_epi<-round(counts_epi)
+luo_dds <- DESeqDataSetFromMatrix(countData = luo_counts,
+                              colData = luo_colData,
+                              design = ~ mol)
+
+# filter gene with low than 10 reads
+keep <- rowSums(counts(luo_dds)) >=10
+luo_dds <- luo_dds[keep,]
+
+# run DESeq2
+luo_dds.samp <- DESeq(luo_dds)
+
+# Generate results object
+luo_res.samp <- results(luo_dds.samp, contrast=c("mol","HRD","HRP"))
+luo_res.samp
+head(luo_res.samp[order(luo_res.samp$padj), ])
+
+## Defining the signatures
+# Define the signatures
+sigHRD_luo.coll.samp.de <- luo_res.samp %>%
+  as.data.frame %>% 
+  arrange(desc(log2FoldChange)) %>% 
+  dplyr::filter(padj < 0.05 & log2FoldChange > 1) %>%
+  # dplyr::filter(pct.1 > 0.1) %>%
+  rownames()
+length(sigHRD_luo.coll.samp.de)
+
+sigHRP_luo.coll.samp.de <- luo_res.samp %>% 
+  as.data.frame %>% 
+  arrange(log2FoldChange) %>% 
+  dplyr::filter(padj < 0.05 & log2FoldChange < -1) %>%
+  # dplyr::filter(pct.2 > 0.1) %>%
+  rownames()
+length(sigHRP_luo.coll.samp.de)
+```
+
+#### From DE comparing HRD vs HRP after grouping by sample and cell type
+
+```{r}
+## Create seudobulk matrix
+# Edit argument how to select "mean" or "sum"
+# ?collapse_counts()
+luo_coll.samp_cell<-presto::collapse_counts(counts_mat = luo_seu@assays$RNA@layers$counts, 
+                                        meta_data = luo_seu@meta.data, 
+                                        varnames = c("Major.cell.type", "Sample"), 
+                                        how="sum")
+
+# Add row and col names according to the varnames
+rownames(luo_coll.samp_cell$counts_mat)<-rownames(luo_seu)
+colnames(luo_coll.samp_cell$counts_mat)<-paste(luo_coll.samp_cell$meta_data$Major.cell.type, 
+                                           luo_coll.samp_cell$meta_data$Sample, sep="__")
+
+luo_coll.samp_cell$counts_long<-luo_coll.samp_cell$counts_mat %>%
+  as.data.frame() %>%
+  rownames_to_column("Gene") %>%
+  gather(cell_type, score, -Gene)
+
+luo_coll.samp_cell$counts_long$Sample<-sapply(luo_coll.samp_cell$counts_long$cell_type, function(x) strsplit(x, "__")[[1]][2])
+luo_coll.samp_cell$counts_long$cell_type<-sapply(luo_coll.samp_cell$counts_long$cell_type, function(x) strsplit(x, "__")[[1]][1])
+
+# Create matrix with epithelial cells only
+luo_coll.samp_cell$epithelial<-luo_coll.samp_cell$counts_long %>% 
+  dplyr::filter(grepl("Epithelial", cell_type))
+# Add HR status from seurat metadata
+luo_coll.samp_cell$epithelial<-merge(luo_coll.samp_cell$epithelial,
+                                 luo_seu@meta.data %>% dplyr::select(Sample, mol) %>% unique)
+# Filter out "Undetermined" samples
+luo_coll.samp_cell$epithelial<-dplyr::filter(luo_coll.samp_cell$epithelial, mol %in% c("HRD","HRP"))
+
+# perform DESeq2 analysis
+# Create DESeq2 object   
+luo_counts.epi<-luo_coll.samp_cell$epithelial %>% 
+  dplyr::select(Sample, Gene, score) %>% 
+  spread(Sample, score) %>% 
+  column_to_rownames("Gene") %>% 
+  as.matrix
+luo_colData<-luo_seu@meta.data %>% 
+  dplyr::select(Sample, mol) %>% 
+  unique()
+rownames(luo_colData)<-luo_colData$Sample
+luo_colData<-luo_colData[colnames(luo_counts.epi),]
+# counts_epi<-round(counts_epi)
+luo_dds <- DESeqDataSetFromMatrix(countData = luo_counts.epi,
+                              colData = luo_colData,
+                              design = ~ mol)
+
+# filter gene with low than 10 reads
+keep <- rowSums(counts(luo_dds)) >=10
+luo_dds <- luo_dds[keep,]
+
+# run DESeq2
+luo_dds.samp_cell <- DESeq(luo_dds)
+
+# Generate results object
+luo_res.samp_cell <- results(luo_dds.samp_cell, contrast=c("mol","HRD","HRP"))
+luo_res.samp_cell
+head(luo_res.samp_cell[order(luo_res.samp_cell$padj), ])
+
+## Defining the signatures
+# Define the signatures
+sigHRD_luo.coll.samp_cell.de <- luo_res.samp_cell %>%
+  as.data.frame %>% 
+  arrange(desc(log2FoldChange)) %>% 
+  dplyr::filter(padj < 0.05 & log2FoldChange > 1) %>%
+  # dplyr::filter(pct.1 > 0.1) %>%
+  rownames()
+length(sigHRD_luo.coll.samp_cell.de)
+
+sigHRP_luo.coll.samp_cell.de <- luo_res.samp_cell %>% 
+  as.data.frame %>% 
+  arrange(log2FoldChange) %>% 
+  dplyr::filter(padj < 0.05 & log2FoldChange < -1) %>%
+  # dplyr::filter(pct.2 > 0.1) %>%
+  rownames()
+length(sigHRP_luo.coll.samp_cell.de)
+
+```
+
+### Export Object
+
+```{r}
+luo_obj<-list(
+  "tables"=list("counts_samp"=luo_counts, "counts_samp.epi"=luo_counts.epi, "colData"=luo_colData),
+  "signatures"=list(
+    "HRD"=list("sc_de"=sigHRD_luo.de,
+               "sc_de.epi"=sigHRD_luo.de.epi,
+               "ps_de"=sigHRD_luo.ps.samp.de, 
+               "ps_de.epi"=sigHRD_luo.ps.samp_cell.de,
+               "ps_coll_de"=sigHRD_luo.coll.samp.de, 
+               "ps_coll_de.epi"=sigHRD_luo.coll.samp_cell.de),
+    "HRP"=list("sc_de"=sigHRP_luo.de,
+               "sc_de.epi"=sigHRP_luo.de.epi,
+               "ps_de"=sigHRP_luo.ps.samp.de, 
+               "ps_de.epi"=sigHRP_luo.ps.samp_cell.de,
+               "ps_coll_de"=sigHRP_luo.coll.samp.de, 
+               "ps_coll_de.epi"=sigHRP_luo.coll.samp_cell.de)
+  )
+)
+# View(luo_obj)
+saveRDS(luo_obj, file="~/GSE222556_objects.rds")
+```
+
+## Launonen, 2024 - Dataset GSE266577
+
+### Dataset preparation
+
+I change the variables of interest names of this data set according to Luo, 2024:
+- Patient code: "patient"
+- Sample code: "Sample"
+- Cell type code: "Major.cell.type"
+
+```{r}
+# Define seurat object of origin: Luo, 2024 - GSE222556
+lau_seu <- readRDS("~/GSE266577_processed.rds")
+colnames(lau_seu@meta.data)[c(4,7)] <- c("Sample", "Major.cell.type")
+lau_seu@meta.data <- mutate(lau_seu@meta.data, Major.cell.type = case_when(
+  Major.cell.type == "Epithelial cells" ~ "Epithelial cell",
+  T ~ Major.cell.type
+))
+
+# cells <- sample(Cells(lau_seu), size = 5000)
+# genes <- sample(rownames(lau_seu), size = 1000)
+# lau_seu_ds <- subset(lau_seu, features = genes, cells = cells)
+# lau_seu <- lau_seu_ds
+
+head(lau_seu@meta.data)
+colnames(lau_seu@meta.data)
+```
+
+### scRNAseq signatures
+
+#### From DE analysis comparing HRD vs HRP cells
+
+Name: dataset.de
+signature: sigXXX_dataset.de
+
+```{r}
+# DE features between HRD and HRP cells
+Idents(lau_seu) <- "mol"
+lau.de <- FindMarkers(lau_seu, ident.1 = "HRD", ident.2 = "HRP", verbose = TRUE)
+# Head results
+head(lau.de, n = 10)
+# Visualize results
+EnhancedVolcano(lau.de,
+                lab = rownames(lau.de),
+                x = 'avg_log2FC',
+                y = 'p_val_adj')
+
+# Define the signature
+sigHRD_lau.de <- lau.de %>%
+  as.data.frame %>% 
+  arrange(desc(avg_log2FC)) %>% 
+  dplyr::filter(p_val_adj < 0.05 & avg_log2FC > 1) %>%
+  dplyr::filter(pct.1 > 0.1) %>%
+  rownames()
+length(sigHRD_lau.de)
+
+sigHRP_lau.de <- lau.de %>% 
+  as.data.frame %>% 
+  arrange(avg_log2FC) %>% 
+  dplyr::filter(p_val_adj < 0.05 & avg_log2FC < -1) %>%
+  dplyr::filter(pct.2 > 0.1) %>%
+  rownames()
+length(sigHRP_lau.de)
+```
+
+#### From DE analysis comparing HRD vs HRP epithelial only cells
+
+DE: dataset.de.epi
+signature: sigXXX_dataset.de.epi
+
+```{r}
+# DE features between HRD and HRP epithelial cells
+lau_seu$celltype.mol <- paste(lau_seu$Major.cell.type, lau_seu$mol, sep = "_")
+Idents(lau_seu) <- "celltype.mol"
+# ?FindMarkers()
+lau.de.epi <- FindMarkers(lau_seu, 
+                             ident.1 = "Epithelial cell_HRD", 
+                             ident.2 = "Epithelial cell_HRP", 
+                             verbose = TRUE)
+# Head results
+head(lau.de.epi, n = 10)
+# Visualize results
+EnhancedVolcano(lau.de.epi,
+                lab = rownames(lau.de.epi),
+                x = 'avg_log2FC',
+                y = 'p_val_adj')
+# Explore overlap
+length(which(rownames(lau.de) %in% rownames(lau.de.epi)))
+
+# Define the signatures
+sigHRD_lau.de.epi <- lau.de.epi %>%
+  as.data.frame %>% 
+  arrange(desc(avg_log2FC)) %>% 
+  dplyr::filter(p_val_adj < 0.05 & avg_log2FC > 1) %>%
+  dplyr::filter(pct.1 > 0.2) %>%
+  rownames()
+length(sigHRD_lau.de.epi)
+
+sigHRP_lau.de.epi <- lau.de.epi %>% 
+  as.data.frame %>% 
+  arrange(avg_log2FC) %>% 
+  dplyr::filter(p_val_adj < 0.05 & avg_log2FC < -1) %>%
+  dplyr::filter(pct.2 > 0.2) %>%
+  rownames()
+length(sigHRP_lau.de.epi)
+
+```
+
+### Pseudobulk signatures - Satija's
+
+#### From DE comparing HRD vs HRP after grouping by sample
+
+pseudo: dataset.ps.samp
+DE: dataset.ps.samp.de
+sig: sigXXX_dataset.ps.samp.de
+
+```{r}
+# Pseudobulk the counts based on sample
+lau.ps.samp <- AggregateExpression(lau_seu, 
+                                   assays = "RNA", 
+                                   return.seurat = T, 
+                                   group.by = c("mol", "Sample"))
+
+# Each 'cell' is a sample-pseudobulk profile
+tail(Cells(lau.ps.samp))
+
+Idents(lau.ps.samp) <- "mol"
+
+# Perform DE analysis after pseudobulking
+lau.ps.samp.de <- FindMarkers(object = lau.ps.samp, 
+                         ident.1 = "HRD", 
+                         ident.2 = "HRP",
+                         test.use = "DESeq2")
+head(lau.ps.samp.de, n = 10)
+EnhancedVolcano(lau.ps.samp.de,
+                lab = rownames(lau.ps.samp.de),
+                x = 'avg_log2FC',
+                y = 'p_val_adj')
+
+# Define the signatures
+sigHRD_lau.ps.samp.de <- lau.ps.samp.de %>%
+  as.data.frame %>% 
+  arrange(desc(avg_log2FC)) %>% 
+  dplyr::filter(p_val_adj < 0.05 & avg_log2FC > 1) %>%
+  # dplyr::filter(pct.1 > 0.1) %>%
+  rownames()
+length(sigHRD_lau.ps.samp.de)
+
+sigHRP_lau.ps.samp.de <- lau.ps.samp.de %>% 
+  as.data.frame %>% 
+  arrange(avg_log2FC) %>% 
+  dplyr::filter(p_val_adj < 0.05 & avg_log2FC < -1) %>%
+  # dplyr::filter(pct.2 > 0.1) %>%
+  rownames()
+length(sigHRP_lau.ps.samp.de)
+```
+
+#### From DE comparing HRD vs HRP after grouping by sample and cell type
+
+pseudo: dataset.ps.samp_cell
+DE: dataset.ps.samp_cell.de
+sig: sigXXX_dataset.ps.samp_cell.de
+
+```{r}
+# Pseudobulk the counts based on sample
+lau.ps.samp_cell <- AggregateExpression(lau_seu, 
+                                   assays = "RNA", 
+                                   return.seurat = T, 
+                                   group.by = c("mol", "Sample", "Major.cell.type"))
+
+# Each 'cell' is a sample-pseudobulk profile
+tail(Cells(lau.ps.samp_cell))
+
+lau.ps.samp_cell$cell.mol <- paste(lau.ps.samp_cell$Major.cell.type, lau.ps.samp_cell$mol, sep = "_")
+
+Idents(lau.ps.samp_cell) <- "cell.mol"
+
+# Perform DE analysis after pseudobulking
+lau.ps.samp_cell.de <- FindMarkers(object = lau.ps.samp_cell, 
+                         ident.1 = "Epithelial cell_HRD", 
+                         ident.2 = "Epithelial cell_HRP",
+                         test.use = "DESeq2")
+head(lau.ps.samp_cell.de, n = 10)
+EnhancedVolcano(lau.ps.samp_cell.de,
+                lab = rownames(lau.ps.samp_cell.de),
+                x = 'avg_log2FC',
+                y = 'p_val_adj')
+
+# Define the signatures
+sigHRD_lau.ps.samp_cell.de <- lau.ps.samp_cell.de %>%
+  as.data.frame %>% 
+  arrange(desc(avg_log2FC)) %>% 
+  dplyr::filter(p_val_adj < 0.05 & avg_log2FC > 1) %>%
+  # dplyr::filter(pct.1 > 0.1) %>%
+  rownames()
+length(sigHRD_lau.ps.samp_cell.de)
+
+sigHRP_lau.ps.samp_cell.de <- lau.ps.samp_cell.de %>% 
+  as.data.frame %>% 
+  arrange(avg_log2FC) %>% 
+  dplyr::filter(p_val_adj < 0.05 & avg_log2FC < -1) %>%
+  # dplyr::filter(pct.2 > 0.1) %>%
+  rownames()
+length(sigHRP_lau.ps.samp_cell.de)
+
+```
+
+### Pseudobulk signatures - presto R package
+
+#### From DE comparing HRD vs HRP after grouping by sample
+
+```{r}
+## Create pseudobulk matrix
+# Edit argument how to select "mean" or "sum"
+# ?collapse_counts()
+lau_coll.samp<-presto::collapse_counts(counts_mat = lau_seu@assays$RNA@layers$counts, 
+                                        meta_data = lau_seu@meta.data, 
+                                        varnames = c("Sample"), 
+                                        how="sum")
+
+# Add row and col names according to the varnames
+rownames(lau_coll.samp$counts_mat)<-rownames(lau_seu)
+colnames(lau_coll.samp$counts_mat)<-lau_coll.samp$meta_data$Sample
+
+lau_coll.samp$counts_long<-lau_coll.samp$counts_mat %>%
+  as.data.frame() %>%
+  rownames_to_column("Gene") %>%
+  gather(Sample, score, -Gene)
+
+# Add HR status from seurat metadata
+lau_coll.samp$counts_long<-merge(lau_coll.samp$counts_long,
+                                 lau_seu@meta.data %>% dplyr::select(Sample, mol) %>% unique)
+# Filter out "Undetermined" samples
+lau_coll.samp$counts_long<-dplyr::filter(lau_coll.samp$counts_long, mol %in% c("HRD","HRP"))
+
+# perform DESeq2 analysis
+# Create DESeq2 object   
+lau_counts<-lau_coll.samp$counts_long %>% 
+  dplyr::select(Sample, Gene, score) %>% 
+  spread(Sample, score) %>%
+  # pivot_wider(names_from = Sample, values_from = score) %>% 
+  column_to_rownames("Gene") %>% 
+  as.matrix
+lau_colData<-lau_seu@meta.data %>% 
+  dplyr::select(Sample, mol) %>% 
+  unique()
+rownames(lau_colData)<-lau_colData$Sample
+lau_colData<-lau_colData[colnames(lau_counts),]
+# counts_epi<-round(counts_epi)
+lau_dds <- DESeqDataSetFromMatrix(countData = lau_counts,
+                              colData = lau_colData,
+                              design = ~ mol)
+
+# filter gene with low than 10 reads
+keep <- rowSums(counts(lau_dds)) >=10
+lau_dds <- lau_dds[keep,]
+
+# run DESeq2
+lau_dds.samp <- DESeq(lau_dds)
+
+# Generate results object
+lau_res.samp <- results(lau_dds.samp, contrast=c("mol","HRD","HRP"))
+lau_res.samp
+head(lau_res.samp[order(lau_res.samp$padj), ])
+
+## Defining the signatures
+# Define the signatures
+sigHRD_lau.coll.samp.de <- lau_res.samp %>%
+  as.data.frame %>% 
+  arrange(desc(log2FoldChange)) %>% 
+  dplyr::filter(padj < 0.05 & log2FoldChange > 1) %>%
+  # dplyr::filter(pct.1 > 0.1) %>%
+  rownames()
+length(sigHRD_lau.coll.samp.de)
+
+sigHRP_lau.coll.samp.de <- lau_res.samp %>% 
+  as.data.frame %>% 
+  arrange(log2FoldChange) %>% 
+  dplyr::filter(padj < 0.05 & log2FoldChange < -1) %>%
+  # dplyr::filter(pct.2 > 0.1) %>%
+  rownames()
+length(sigHRP_lau.coll.samp.de)
+```
+
+#### From DE comparing HRD vs HRP after grouping by sample and cell type
+
+```{r}
+## Create pseudobulk matrix
+# Edit argument how to select "mean" or "sum"
+# ?collapse_counts()
+lau_coll.samp_cell<-presto::collapse_counts(counts_mat = lau_seu@assays$RNA@layers$counts, 
+                                        meta_data = lau_seu@meta.data, 
+                                        varnames = c("Major.cell.type", "Sample"), 
+                                        how="sum")
+
+# Add row and col names according to the varnames
+rownames(lau_coll.samp_cell$counts_mat)<-rownames(lau_seu)
+colnames(lau_coll.samp_cell$counts_mat)<-paste(lau_coll.samp_cell$meta_data$Major.cell.type, 
+                                           lau_coll.samp_cell$meta_data$Sample, sep="__")
+
+lau_coll.samp_cell$counts_long<-lau_coll.samp_cell$counts_mat %>%
+  as.data.frame() %>%
+  rownames_to_column("Gene") %>%
+  gather(cell_type, score, -Gene)
+
+lau_coll.samp_cell$counts_long$Sample<-sapply(lau_coll.samp_cell$counts_long$cell_type, function(x) strsplit(x, "__")[[1]][2])
+lau_coll.samp_cell$counts_long$cell_type<-sapply(lau_coll.samp_cell$counts_long$cell_type, function(x) strsplit(x, "__")[[1]][1])
+
+# Create matrix with epithelial cells only
+lau_coll.samp_cell$epithelial<-lau_coll.samp_cell$counts_long %>% 
+  dplyr::filter(grepl("Epithelial", cell_type))
+# Add HR status from seurat metadata
+lau_coll.samp_cell$epithelial<-merge(lau_coll.samp_cell$epithelial,
+                                 lau_seu@meta.data %>% dplyr::select(Sample, mol) %>% unique)
+# Filter out "Undetermined" samples
+lau_coll.samp_cell$epithelial<-dplyr::filter(lau_coll.samp_cell$epithelial, mol %in% c("HRD","HRP"))
+
+# perform DESeq2 analysis
+# Create DESeq2 object   
+lau_counts.epi<-lau_coll.samp_cell$epithelial %>% 
+  dplyr::select(Sample, Gene, score) %>% 
+  spread(Sample, score) %>% 
+  column_to_rownames("Gene") %>% 
+  as.matrix
+lau_colData<-lau_seu@meta.data %>% 
+  dplyr::select(Sample, mol) %>% 
+  unique()
+rownames(lau_colData)<-lau_colData$Sample
+lau_colData<-lau_colData[colnames(lau_counts.epi),]
+# counts_epi<-round(counts_epi)
+lau_dds <- DESeqDataSetFromMatrix(countData = lau_counts.epi,
+                              colData = lau_colData,
+                              design = ~ mol)
+
+# filter gene with low than 10 reads
+keep <- rowSums(counts(lau_dds)) >=10
+lau_dds <- lau_dds[keep,]
+
+# run DESeq2
+lau_dds.samp_cell <- DESeq(lau_dds)
+
+# Generate results object
+lau_res.samp_cell <- results(lau_dds.samp_cell, contrast=c("mol","HRD","HRP"))
+lau_res.samp_cell
+head(lau_res.samp_cell[order(lau_res.samp_cell$padj), ])
+
+## Defining the signatures
+# Define the signatures
+sigHRD_lau.coll.samp_cell.de <- lau_res.samp_cell %>%
+  as.data.frame %>% 
+  arrange(desc(log2FoldChange)) %>% 
+  dplyr::filter(padj < 0.05 & log2FoldChange > 1) %>%
+  # dplyr::filter(pct.1 > 0.1) %>%
+  rownames()
+length(sigHRD_lau.coll.samp_cell.de)
+
+sigHRP_lau.coll.samp_cell.de <- lau_res.samp_cell %>% 
+  as.data.frame %>% 
+  arrange(log2FoldChange) %>% 
+  dplyr::filter(padj < 0.05 & log2FoldChange < -1) %>%
+  # dplyr::filter(pct.2 > 0.1) %>%
+  rownames()
+length(sigHRP_lau.coll.samp_cell.de)
+
+```
+
+### Export Object
+
+```{r}
+lau_obj<-list(
+  "tables"=list("counts_samp"=lau_counts, "counts_samp.epi"=lau_counts.epi, "colData"=lau_colData),
+  "signatures"=list(
+    "HRD"=list("sc_de"=sigHRD_lau.de,
+               "sc_de.epi"=sigHRD_lau.de.epi,
+               "ps_de"=sigHRD_lau.ps.samp.de, 
+               "ps_de.epi"=sigHRD_lau.ps.samp_cell.de,
+               "ps_coll_de"=sigHRD_lau.coll.samp.de, 
+               "ps_coll_de.epi"=sigHRD_lau.coll.samp_cell.de),
+    "HRP"=list("sc_de"=sigHRP_lau.de,
+               "sc_de.epi"=sigHRP_lau.de.epi,
+               "ps_de"=sigHRP_lau.ps.samp.de, 
+               "ps_de.epi"=sigHRP_lau.ps.samp_cell.de,
+               "ps_coll_de"=sigHRP_lau.coll.samp.de, 
+               "ps_coll_de.epi"=sigHRP_lau.coll.samp_cell.de)
+  )
+)
+# View(lau_obj)
+saveRDS(lau_obj, file="~/GSE266577_objects.rds")
+```
+
+## Common features among signatures
+
+```{r}
+# Length of signatures
+a <- print(lengths(luo_obj$signatures$HRD))
+b <- print(lengths(luo_obj$signatures$HRP))
+c <- print(lengths(lau_obj$signatures$HRD))
+d <- print(lengths(lau_obj$signatures$HRP))
+
+library(knitr)
+kable(data.frame(a,b,c,d), col.names = c("Luo HRD sigs", "Luo HRP sigs", "Launonen HRD sigs", "Launonen HRP sigs"))
+
+# Common features among signatures of Luo
+# HRD
+features <- unlist(luo_obj$signatures$HRD)
+length(features)
+df <- data.frame(table(features)[table(features)>1]) %>% arrange(desc(Freq))
+head(df,10)
+feat_luo.HRD <- as.vector(df$features)
+
+# HRP
+features <- unlist(luo_obj$signatures$HRP)
+length(features)
+df <- data.frame(table(features)[table(features)>1]) %>% arrange(desc(Freq))
+head(df,10)
+feat_luo.HRP <- as.vector(df$features)
+
+# Common features among signatures of Launonen
+# HRD
+features <- unlist(lau_obj$signatures$HRD)
+length(features)
+df <- data.frame(table(features)[table(features)>1]) %>% arrange(desc(Freq))
+head(df,10)
+feat_lau.HRD <- as.vector(df$features)
+
+# HRP
+features <- unlist(lau_obj$signatures$HRP)
+length(features)
+df <- data.frame(table(features)[table(features)>1]) %>% arrange(desc(Freq))
+head(df,10)
+feat_lau.HRP <- as.vector(df$features)
+
+# Common features among datasets
+x <- list(Luo = unlist(luo_obj$signatures$HRD), Launonen = unlist(lau_obj$signatures$HRD))
+ggVennDiagram(x, set_size = 0)+
+ theme(legend.position = "none")
+y <- list(Luo = unlist(luo_obj$signatures$HRP), Launonen = unlist(lau_obj$signatures$HRP))
+ggVennDiagram(y, set_size = 0)
+
+feat_HRD <- intersect(unlist(luo_obj$signatures$HRD), unlist(lau_obj$signatures$HRD))
+feat_HRP <- intersect(unlist(luo_obj$signatures$HRP), unlist(lau_obj$signatures$HRP))
+
+# Create object
+common_sig<-list("Luo_HRD" = feat_luo.HRD, 
+                 "Launonen_HRD" = feat_lau.HRD,
+                 "Common_HRD" = feat_HRD,
+                 "Luo_HRP" = feat_luo.HRP, 
+                 "Launonen_HRP" = feat_lau.HRP,
+                 "Common_HRP" = feat_HRP)
+saveRDS(common_sig, "common_sig.rds")
+```
+
+## Published signatures
+
+Bulk-RNA derived HR signatures from the literature
+
+```{r}
+sig_walens <- c("XPA", "HORMAD1", "PMS2", "MLH3", "BRCA1", "APOBEC3B", "FANCA", "POLK", "MLH1", "RAD50", "XRCC1", "FANCD2", "NEIL2", "LIG3", "MSH6", "UBE2B", "MAGEA4", "XPC", "MSH3", "XRCC5", "POLI", "FANCI", "FEN1", "MAGEA6", "NEIL1", "REV1", "MSH2", "APOBEC3A", "RAD51", "POLQ")
+
+# Upregulated genes from the HRDness signature
+sig_takamatsu <- c("A2M", "MRPL46", "ABCD1", "MRPS11", "ADCK2", "MT1E", "ANKRD49", "MTM1", "ANXA1", "MYL5", "ASB7", "NAB1", "ASNSD1", "NADSYN1", "ATAD2", "NARS2", "ATP6V1E1", "NDRG1", "B3GALT4", "NPEPL1", "BBOX1", "NQO2", "BCAP31", "NSDHL", "BCL2L13", "NUBPL", "BID", "OGFRL1", "BOP1", "P2RY6", "BRCC3", "PCGF3", "C11orf71", "PDE6B", "C8orf33", "PHF20L1", "CCDC90B", "PHKA1", "CD83", "PIR", "CEP57", "PNPLA4", "CHN1", "POLD4", "CHORDC1", "POLE3", "COQ10B", "PRCP", "CPSF1", "PRPS2", "CRABP2", "PRSS23", "CREB3", "PTK2", "CRTC3", "PUF60", "CXCL10", "PYCR1", "CXCL11", "RAB40B", "CYC1", "RAB9A", "DCUN1D4", "RABEPK", "DCXR", "RAP2C", "DERL1", "RECQL4", "DGAT1", "RMI1", "DUSP22", "RNF139", "EHD1", "S100A9", "EIF1AX", "SAC3D1", "EML1", "SAT1", "ENDOD1", "SCD", "ERG", "SCML1", "ETFB", "SDF2L1", "EXOSC4", "SECTM1", "FAM3A", "SFXN1", "FANCI", "SGPP1", "FBXL6", "SHARPIN", "FJX1", "SIRT5", "FMR1", "SLBP", "FRYL", "SLC10A3", "FZD4", "SLC25A1", "GABRE", "SLC39A4", "GABRP", "SLC3A2", "GADD45B", "SLC9A6", "GBP1", "SNRPA1", "GBP2", "SQLE", "GCH1", "ST6GALNAC5", "GEMIN8", "STEAP1", "GPAA1", "STK17B", "GRINA", "SYNGR2", "GRPEL1", "TANK", "GSTK1", "TFAP2C", "HCCS", "TINF2", "HLA-F", "TK1", "HMGB3", "TM2D3", "HOPX", "TMEM126B", "HPRT1", "TMEM135", "HSF1", "TMEM165", "HSPA1A", "TMEM187", "IDH2", "TMEM38B", "IDH3A", "TNFRSF21", "IER3", "TPM1", "IL13RA1", "TRMT12", "IMPA2", "UBB", "INSIG1", "UBL4A", "JRKL", "VBP1", "KLK8", "VPS28", "KRT6A", "YIF1A", "LDB2", "YIPF6", "LRRC14", "ZC3H3", "LRRK1", "ZDHHC24", "MAPK9", "ZNF16", "MED17", "ZNF250", "MED7", "ZNF267", "MEF2A", "ZNF34", "METRN", "ZNF623", "MRPL13", "ZNF7", "MRPL40")
+
+# Downregulated genes from the HRDness signature
+sig_takamatsu_down <- c("ALDH4A1", "ALDOC", "APP", "ATXN2", "BBS9", "BMI1", "BRCA1", "C11orf49", "CCDC130",  "CCDC92", "CDK7", "CDKN1C", "CHRNB1", "CHST12", "CLASP1", "CLIP3", "CLSTN3", "CPOX", "DUOX1", "ECSIT", "EIF2AK1", "EIF4G3", "ERAL1", "EXOSC10", "FBXL18", "FBXO2", "FLOT2","GIPC1", "GLTP", "ICA1", "LAMB2", "LGALS8", "LTA4H", "LTBP4", "MMS19", "MRPS27",  "MYL6B", "NAGPA", "NAP1L1", "NR2F6", "PHACTR4", "PHF21A", "PKN1", "PLTP", "PMS2CL",  "POLR3B", "POP4", "PRDM4", "PRKCSH", "PTPN14", "RAD17", "RCAN3", "RCBTB1", "RCOR3","RPS6KC1", "RRP15", "SARS2", "SMYD2", "SMYD3", "STX10", "STX1A", "SUPT6H", "TEAD1", "TP53BP2", "TRAF5", "TRIM8", "TSC2", "TTC31", "USP48", "UTP15", "WIPI2", "ZFYVE16", "ZMYND8", "ZNF10", "ZNF12", "ZNF84")
+
+sig_pan <- c("SOX9-AS1", "WNK3", "LINC01152","UGT8", "ROCR", "RPSAP69", "LINC02188", "OXGR1", "ROPN1B", "SOX6", "LEMD1", "LINC01198", "OCA2", "LINC01122", "LINC00839", "MIA", "CT83", "SVOPL", "PTX3", "SEC14L4", "VXN", "KRT83", "SLC6A15", "SPHKAP", "TCAM1P", "LINC00518", "CMTM5")
+
+sig_lee <- c("GTF3C2", "GTF3C3", "SLC41A2", "TMEM165", "GCC2", "TM9SF4", "MON2", "RHOBTB3", "VPS35", "SNX6", "SRP54", "NKX6-1", "TFRC", "SYT11", "EIF2AK3", "TNFSF4", "OSBPL2", "LRP6", "MRPS11", "MRPS18A", "MRPL47", "MRPL46", "PPAT", "ME1", "UBL4A", "NPLOC4", "BANF1", "GBP1", "PSMA6", "PSMD12", "FBXL18", "NHLRC1", "FBXO9", "PLSCR2", "ACTL6A", "DEK", "TAF4", "ATR", "PRC1", "CDC25C", "AURKA", "MED8", "E2F3", "HECW2", "ELOVL1", "ACOX1", "TSPAN17", "SMYD5", "NUP107", "KIF3B", "PUS10", "TRMT12", "MAPK9", "SLC43A2", "TRIM46", "SNAP29")
+
+# Create an object with all the signatures
+publ_sigs<-list("Wallens"=sig_walens, "Tak_Up"=sig_takamatsu, "Tak_Down"=sig_takamatsu_down, "Pan"=sig_pan, "Lee"=sig_lee)
+saveRDS(publ_sigs, "publ_sigs.rds")
+```

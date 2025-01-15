@@ -1,0 +1,509 @@
+---
+title: "scRNAseq quality control and processing"
+author: "Juan A. Marín Jiménez"
+output: 
+  html_document:
+    toc:  true
+    toc_depth:  3
+    toc_float:  false
+date: "`r Sys.Date()`"
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+if(1){
+  library(R.utils)
+  library(Seurat)
+  library(tidyverse)
+  library(ggplot2)
+  library(patchwork)
+  library(HGNChelper)
+  # install.packages("ggpubr")
+  library(ggpubr)
+  # install.packages("RCurl")
+  library(RCurl)
+  library(AnnotationHub)
+  library(ensembldb)
+  # BiocManager::install("DESeq2")
+  library(DESeq2)
+  library(glmGamPoi)
+  # BiocManager::install("EnhancedVolcano")
+  library(EnhancedVolcano)
+  library(knitr)
+}
+```
+
+# R update and Seurat R package installation
+
+I followed installation instructions for Seurat_v5 at <https://satijalab.org/seurat/articles/install_v5.html> but needed to reinstall a lot of dependencies before
+
+```{r}
+if(0){
+  # R update needed
+  # Save packages
+  tmp <- installed.packages()
+  installedpkgs <- as.vector(tmp[is.na(tmp[,"Priority"]), 1])
+  save(installedpkgs, file="installed_old.rda")
+  # Install R here
+  # Recover packages
+  load("installed_old.rda")
+  tmp <- installed.packages()
+  # installedpkgs.new <- as.vector(tmp[is.na(tmp[,"Priority"]), 1])
+  missing <- setdiff(installedpkgs, installedpkgs.new)
+  # install.packages(missing)
+  update.packages()
+  
+  # Seurat installation
+  # install.packages('Seurat')
+  
+  # Other recommended packages
+  setRepositories(ind = 1:3, addURLs = c('https://satijalab.r-universe.dev', 'https://bnprks.r-universe.dev/'))
+  # install.packages(c("BPCells", "presto", "glmGamPoi"))
+  
+  # Install the remotes package
+  if (!requireNamespace("remotes", quietly = TRUE)) {
+    install.packages("remotes")
+  }
+  install.packages('Signac')
+  remotes::install_github("satijalab/seurat-data", quiet = TRUE)
+  remotes::install_github("satijalab/azimuth", quiet = TRUE)
+  remotes::install_github("satijalab/seurat-wrappers", quiet = TRUE)
+}
+```
+
+# GSE dataset download
+
+Script for direct conexion with GEO for dataset downloading.
+
+```{r}
+if(0){
+  # Install GEOquery
+  if (!requireNamespace("GEOquery", quietly = TRUE)) {
+    install.packages("GEOquery")
+  }
+  library(GEOquery)
+  # Dataset: Zhang_2022
+  # gse_id <- "GSE165897"
+  # gse_data <- getGEO(gse_id, GSEMatrix = TRUE)
+  # gse_info <- getGEOSuppFiles(gse_id)
+}
+```
+
+# Seurat object creation
+
+## Dataset: Zhang, 2022 - GSE165897
+
+```{r}
+if(0){
+  # metadata
+  cell_info <- data.table::fread("GSE165897/GSE165897_cellInfo_HGSOC.tsv.gz") %>% 
+    column_to_rownames(var = 'cell')
+  
+  # exploring cell metadata and annotation categories
+  cbind(table(cell_info$cell_subtype))
+  table(cell_info$cell_subtype, cell_info$cell_type)
+  
+  # count matrix
+  umi_counts <- data.table::fread("GSE165897/GSE165897_UMIcounts_HGSOC.tsv.gz") %>% 
+    column_to_rownames(var = 'V1')
+  # umi_counts[1:3,1:3]
+  # umi_counts_HOLD <- umi_counts
+  
+  # Create my Seurat object
+  zhang_22 <- CreateSeuratObject(counts=umi_counts, meta.data=cell_info)
+  Layers(zhang_22)
+  
+  zhang_22
+  
+  # Columns of metadata
+  colnames(zhang_22@meta.data)
+  
+  # Explore metadata
+  head(zhang_22@meta.data)
+  
+  # Patients
+  unique(zhang_22@meta.data$patient_id)
+  
+  # Number of cells per patient and condition
+  table(zhang_22@meta.data$treatment_phase, zhang_22@meta.data$patient_id)
+}
+```
+
+# Metadata modification
+
+```{r}
+if(0){
+  # Import metadata tables from the .xlsx database
+  md_samples <- readxl::read_xlsx("~/TFM-local/NACT_OV_scRNAseq_datasets_DEF2.xlsx", sheet = 4)
+  md_patients  <- readxl::read_xlsx("~/TFM-local/NACT_OV_scRNAseq_datasets_DEF2.xlsx", sheet = 3)
+  
+  unique(md_patients$dataset)
+  
+  colnames(md_patients)
+  colnames(md_samples)
+  
+  # Merge patient / sample information
+  md_zhang_22 <- merge(
+    md_samples %>% dplyr::select(-comments) %>% dplyr::filter(dataset == "zhang_2022"),
+    md_patients %>% dplyr::select(-comments) %>% dplyr::filter(dataset == "zhang_2022"),
+    by.x="patient", by.y="patient")
+  
+  df <- md_zhang_22
+  
+  # Explore metadata dataframe
+  head(df)
+  str(df)
+  
+  # Common columns
+  head(zhang_22@meta.data) #sample
+  head(df) #code.x
+  
+  # Create Barcode on the seurat
+  zhang_22@meta.data$Barcode <- rownames(zhang_22@meta.data)
+  
+  # Merge metadata
+  merged_md <- merge(zhang_22@meta.data, df, by.x = "sample", by.y = "code.x")
+  head(merged_md)
+  str(merged_md)
+  
+  # Create new rownames
+  rownames(merged_md)<-merged_md$Barcode
+  dim(merged_md)
+  
+  # Filter metadata according to "sam_ana" and "pat_ana" if needed
+  # 1 = to be included in the analyses
+  merged_md <- merged_md %>% dplyr::filter(sam_ana == 1 & pat_ana == 1)
+  dim(merged_md)
+  
+  # Match order of rows according to the seurat object
+  new_rownames<-rownames(zhang_22@meta.data)[rownames(zhang_22@meta.data) %in% rownames(merged_md)]
+  merged_md<-merged_md[new_rownames,]
+  
+  # Transfer to metadata
+  zhang_22@meta.data <- merged_md
+  View(zhang_22@meta.data)
+  
+  # SAVE
+  # saveRDS(zhang_22, "~/GSE165897_raw.rds")
+}
+```
+
+# Seurat object QC analysis
+
+The objective is to develop an script to get a QC report of every Seurat object created for the project
+
+## QC parameters computation
+
+```{r}
+if(0){
+  gc()
+  # seurat <- readRDS("~/GSE165897_raw.rds")
+  head(seurat@meta.data, 10)
+  colnames(seurat@meta.data)
+  unique(seurat$cell_type)
+  unique(seurat$cell_subtype)
+  
+  # mitochondrial read content per cell
+  grep ("^MT-", rownames(seurat[["RNA"]]),value = T)
+  seurat[["perc.mt"]] <- PercentageFeatureSet(seurat, pattern = "^MT-")
+  # ribosomal read content per cell
+  seurat[["perc.ribo"]] <- PercentageFeatureSet(seurat, pattern = "RB[SL]")
+  # hemoglobin genes - includes all genes starting with HB except HBP.
+  seurat[["perc.hem"]] <- PercentageFeatureSet(seurat, pattern = "^HB[^(P|E|S)]")
+  # platelet markers
+  seurat[["perc.plat"]] <- PercentageFeatureSet(seurat, pattern = "PECAM1|PF4")
+  # Add number of genes per UMI for each cell to metadata
+  seurat[["log10GenesPerUMI"]] <- log10(seurat$nFeature_RNA) / log10(seurat$nCount_RNA)
+}
+```
+
+## Visualization of QC parameters
+
+```{r}
+if(0){
+  # ploting QC metrics as violin plots
+  qc_features <- c("nCount_RNA", "nFeature_RNA", "perc.mt", "perc.ribo", "perc.hem", "perc.plat")
+  
+  # QC parameters on the dataset:
+  VlnPlot(seurat, features = qc_features, ncol = 6, alpha = .05)
+  
+  # By samples
+  # seurat@meta.data$treatment_phase<-factor(seurat@meta.data$treatment_phase, levels = c("treatment-naive", "post-NACT"))
+  VlnPlot(seurat, 
+          group.by = "patient_id", 
+          split.by = "treatment_phase", 
+          features = "perc.mt", 
+          pt.size = 0.01,
+          alpha = .05)
+  
+  # FeatureScatter to visualize feature-feature relationships
+  plot1 <- FeatureScatter(seurat, feature1 = "nCount_RNA", feature2 = "perc.mt")
+  plot2 <- FeatureScatter(seurat, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
+  CombinePlots(plots = list(plot1, plot2))
+  
+  # Visualize the number of cell counts per sample
+  seurat@meta.data %>% 
+  	ggplot(aes(patient_id, fill=treatment_phase)) + 
+  	geom_bar() +
+  	theme_classic() +
+  	theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) +
+  	theme(plot.title = element_text(hjust=0.5, face="bold")) +
+  	ggtitle("# cells / sample")
+  
+  # Visualize the number UMIs/transcripts per cell
+  seurat@meta.data %>% 
+  	ggplot(aes(x=nCount_RNA)) + 
+  	geom_density(alpha = 0.2) + 
+  	scale_x_log10() + 
+  	theme_classic() +
+  	ylab("density")+
+  	ggtitle("#UMI per cell")
+  	# geom_vline(xintercept = 0)
+  
+  # Visualize the distribution of genes detected per cell via histogram
+  # Add variables for conditions
+  seurat@meta.data %>% 
+  	ggplot(aes(color=patient_id, x=nFeature_RNA, fill=patient_id)) + 
+  	geom_density(alpha = 0.2) + 
+  	theme_classic() +
+  	scale_x_log10() + 
+    ylab("density")
+  	# geom_vline(xintercept = 500)
+  seurat@meta.data %>% 
+  	ggplot(aes(color=treatment_phase, x=nFeature_RNA, fill=treatment_phase)) + 
+  	geom_density(alpha = 0.2) + 
+  	theme_classic() +
+  	scale_x_log10() + 
+    ylab("density")
+  	# geom_vline(xintercept = 500)
+  
+  # Visualize the correlation between genes detected and number of UMIs and determine whether
+  # strong presence of cells with low numbers of genes/UMIs
+  seurat@meta.data %>% 
+    ggplot(aes(x=nCount_RNA, y=nFeature_RNA, color=perc.mt)) + 
+    geom_point() + 
+    scale_color_gradient(low = "gray90", high = "black") +
+    stat_smooth(method=lm) +
+    scale_x_log10() + 
+    scale_y_log10() + 
+    theme_classic() +
+    # geom_vline(xintercept = 500) +
+    # geom_hline(yintercept = 250) +
+    facet_wrap(~patient_id)
+  
+  # Visualize the distribution of mitochondrial gene expression detected per cell
+  seurat@meta.data %>% 
+    ggplot(aes(color=patient_id, x=perc.mt, fill=patient_id)) + 
+    geom_density(alpha = 0.2) + 
+    # scale_x_continuous(limits = c(0,100)) + 
+    theme_classic()
+  
+  # Visualize overall complexity of the gene expression by visualizing the genes detected perUMI
+  seurat@meta.data %>%
+  	ggplot(aes(x=log10GenesPerUMI, color = patient_id, fill= patient_id)) +
+  	geom_density(alpha = 0.2) +
+  	theme_classic() +
+  	geom_vline(xintercept = 0.8, color="red")
+}
+```
+
+# Processing
+
+## Check for previous processing
+
+Interrogate the structure of the seurat object to assess that normalization, scalation or variable features search have not been previously computed.
+
+```{r}
+if(0){
+  # Check normalization
+  norm_test <- function(seurat, assayName = 'RNA') {
+    return(!identical(seurat@assays[[assayName]]$counts, seurat@assays[[assayName]]$data))
+  }
+  norm_test(seurat)
+  head(seurat@assays$RNA$counts,10)
+  head(seurat@assays$RNA$data,10)
+  
+  # Check scalation
+  head(seurat@assays$RNA$scale.data)
+  
+  # Check variable features
+  VariableFeatures(seurat)
+}
+```
+
+## Filtering according to QC parameters
+
+Need to consensuate criteria if a general seurat object is built. Filtering criteria are established according to individual QC report for each dataset.
+
+### Filtering cells
+
+```{r}
+if(0){
+  # Cell level filtering: Zhang, 2022 - GSE165897
+  seurat_filtered <- subset(seurat, subset = 
+                              (nCount_RNA >= 1000) & 
+                              (nFeature_RNA >= 500) & 
+                              (log10GenesPerUMI > 0.80) & 
+                              (perc.mt < 10)
+  )
+  # Check the reduction for "samples": 3000 cells have been filtered out
+  seurat
+  seurat_filtered
+}
+```
+
+### Filtering genes
+
+```{r}
+if(0){
+  # Gene level filtering
+  # Keep the genes that are present at least in 10 cells
+  
+  # Extract counts
+  counts <- GetAssayData(object = seurat_filtered, layer = "counts")
+  
+  # Output a logical vector for every gene on whether the more than zero counts per cell
+  nonzero <- counts > 0
+  
+  # Sums all TRUE values and returns TRUE if more than 10 TRUE values per gene
+  keep_genes <- Matrix::rowSums(nonzero) >= 10
+  
+  # Only keeping those genes expressed in more than 10 cells
+  filtered_counts <- counts[keep_genes, ]
+  
+  # Reassign to filtered Seurat object
+  seurat_filtered <- CreateSeuratObject(filtered_counts, meta.data = seurat_filtered@meta.data)
+  
+  # Check the reduction for "features": 4000 genes have been filtered out
+  seurat
+  seurat_filtered
+  
+  # saveRDS(seurat_filtered, file="~/GSE165897_filtered.rds")
+}
+```
+
+# scRNAseq workflow
+
+This script follows Satija's lab scRNAseq workflow using Seurat v5
+
+```{r}
+if(0){
+  # Import filtered seurat object
+  # seurat_filtered <- readRDS("~/GSE165897_filtered.rds")
+  
+  # Normalization
+  seurat_filtered <- NormalizeData(seurat_filtered, 
+                          normalization.method = "LogNormalize", 
+                          scale.factor = 10000
+  )
+  
+  # # Cell cycle score - https://hbctraining.github.io/scRNA-seq_online/lessons/cell_cycle_scoring.html
+  # # Download cell cycle genes for organism at https://github.com/hbc/tinyatlas/tree/master/cell_cycle. 
+  # cc_file <- getURL("https://raw.githubusercontent.com/hbc/tinyatlas/master/cell_cycle/Homo_sapiens.csv") 
+  # cell_cycle_genes <- read.csv(text = cc_file)
+  # # Connect to AnnotationHub
+  # ah <- AnnotationHub()
+  # # Access the Ensembl database for organism
+  # ahDb <- query(ah, pattern = c("Homo sapiens", "EnsDb"), ignore.case = TRUE)
+  # # Acquire the latest annotation files
+  # id <- ahDb %>% mcols() %>% rownames() %>% tail(n = 1)
+  # # Download the appropriate Ensembldb database
+  # edb <- ah[[id]]
+  # # Extract gene-level information from database
+  # annotations <- genes(edb, return.type = "data.frame")
+  # # Select annotations of interest
+  # annotations <- annotations %>% dplyr::select(gene_id, gene_name, seq_name, gene_biotype, description)
+  # # Get gene names for Ensembl IDs for each gene
+  # cell_cycle_markers <- dplyr::left_join(cell_cycle_genes, annotations, by = c("geneID" = "gene_id"))
+  # # Acquire the S phase genes
+  # s_genes <- cell_cycle_markers %>% dplyr::filter(phase == "S") %>% pull("gene_name")
+  # # Acquire the G2M phase genes        
+  # g2m_genes <- cell_cycle_markers %>% dplyr::filter(phase == "G2/M") %>% pull("gene_name")
+  
+  # Perform cell cycle scoring
+  seurat_filtered <- CellCycleScoring(seurat_filtered, g2m.features = g2m_genes, s.features = s_genes)
+  # View(seurat_filtered@meta.data)
+  
+  # Identify most variable genes
+  # ?FindVariableFeatures()
+  seurat_filtered <- FindVariableFeatures(seurat_filtered)
+  
+  # Scale the counts regressing the mitochondrial content out
+  seurat_filtered <- ScaleData(seurat_filtered, vars.to.regress = "perc.mt")
+  
+  # Run principal component analysis
+  seurat_filtered <- RunPCA(seurat_filtered, 
+                            npcs = 50, 
+                            ndims.print = 1:5, 
+                            nfeatures.print = 10)
+  
+  # Plot the PCA by cell cycle phase
+  DimPlot(seurat_filtered, reduction = "pca", group.by = "Phase", split.by = "Phase")
+  # No need for regressing cell cycle phase
+  
+  # Visualize number of PCs
+  ElbowPlot(seurat_filtered, ndims = 50)
+  # Inspect the top genes contributing to each PC
+  # VizDimLoadings(seurat_filtered, dims = 1:2, reduction = "pca")
+  
+  # Selecting the 30 first PCs for clustering
+  ncomp <- 30
+  seurat_filtered<-FindNeighbors(seurat_filtered, reduction = "pca", dims = 1:ncomp, nn.eps=0.5)
+  # kNN graph and clustering at several resolutions
+  for(i in c(seq(0.1,1,0.1), 1.5, 2, 2.5, 3, 5, 10)) {
+    seurat_filtered<-FindClusters(seurat_filtered, resolution = i, n.start=10)
+  }
+  # seurat_filtered <- RunTSNE(seurat, dims= 1:ncomp, tsne.method = "Rtsne", nthreads=16, max_iter=2000, check_duplicates = FALSE)
+  
+  # RunUMAP
+  seurat_filtered <- RunUMAP(seurat_filtered, dims = 1:ncomp, nn.eps=0.5)
+  
+  # # ALTERNATIVE: SCT transform - https://satijalab.org/seurat/articles/sctransform_vignette.html
+  # seurat_filtered <- readRDS("~/GSE165897_filtered.rds")
+  # options(future.globals.maxSize= 5000 * 1024^2)
+  # seurat_sct  <- SCTransform(seurat_sct, vars.to.regress = "perc.mt", verbose = TRUE)
+  
+  # SAVE
+  saveRDS(seurat_filtered, "~/GSE165897_processed.rds")
+}
+```
+
+# Visualize UMAP
+
+```{r}
+if(0){
+  # Import processed seurat object
+  seu <- readRDS("~/TFM-local/Seurat/GSE165897_processed.rds")
+  # View(seu@meta.data)
+  seu@meta.data$treatment_phase<-factor(seu@meta.data$treatment_phase, 
+                                        levels = c("treatment-naive", "post-NACT"))
+  
+  # UMAP visualization according to metadata variables
+  # clusters
+  DimPlot(seu, reduction = "umap", label = FALSE)+
+    guides(color="none")+
+    theme(aspect.ratio=1)
+  # patient id
+  DimPlot(seu, reduction = "umap", group.by = "patient_id", label = F, label.box = T)+
+    theme(aspect.ratio=1)
+  # sample
+  DimPlot(seu, reduction = "umap", group.by = "sample", label = F, label.box = T)+
+    guides(color="none")+
+    theme(aspect.ratio=1)
+  # treatment
+  DimPlot(seu, reduction = "umap", group.by = "treatment_phase", label = F, label.box = T)+
+    theme(aspect.ratio=1)
+  # location
+  DimPlot(seu, reduction = "umap", group.by = "anatomical_location", label = F, label.box = T)+
+    theme(aspect.ratio=1)
+  # original annotation
+  DimPlot(seu, reduction = "umap", group.by = "cell_type", label = F, label.box = T)+
+    theme(aspect.ratio=1)
+  # patient id and treatment
+  DimPlot(seu, reduction = "umap", group.by = "patient_id", split.by = "treatment_phase", 
+          label = FALSE, label.box = T)+ 
+    theme(aspect.ratio=1)
+}
+```

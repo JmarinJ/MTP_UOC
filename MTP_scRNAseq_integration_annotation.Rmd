@@ -1,0 +1,201 @@
+---
+title: "scRNAseq integration and annotation"
+author: "Juan A. Marín Jiménez"
+output: 
+  html_document:
+    toc:  true
+    toc_depth:  3
+    toc_float:  false
+date: "`r Sys.Date()`"
+editor_options: 
+  chunk_output_type: console
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+if(1){
+  library(R.utils)
+  library(Seurat)
+  library(tidyverse)
+  library(ggplot2)
+  library(patchwork)
+  library(HGNChelper)
+  library(ggpubr)
+}
+```
+
+# Integration
+
+The decision to integrate the datase before annotation will depend on previous step. 
+If merging different datasets we will implement this step according to patient IDs for batch correction.
+For individual datasets I will not implement this step.
+
+After integration, we need to perform dimensionality reduction, clustering, and
+then proceed with the annotation.
+
+```{r}
+if(0){
+  table(seu$patient_id)
+  table(seu$anatomical_location, seu$treatment_phase)
+  
+  # Split seurat object by patient ID
+  seu.list <- SplitObject(seu, split.by = "patient_id")
+  
+  # Apply scRNAseq workflow for independent patients
+  seu.list <- lapply(seu.list, FUN = function(x) {
+    x <- NormalizeData(x, verbose = FALSE)
+    x <- FindVariableFeatures(x, verbose = FALSE)
+  })
+  
+  # Select most 1000 relevant features and continue the workflow using them
+  features <- SelectIntegrationFeatures(object.list = seu.list, nfeatures = 1000)
+  seu.list <-lapply(seu.list, FUN = function(x) {
+    x <- ScaleData(x, features = features, verbose = FALSE)
+    x <- RunPCA(x, features = features, verbose = FALSE)
+  })
+  # Find integration anchors
+  anchors <- FindIntegrationAnchors(object.list = seu.list, reduction = "rpca", dims = 1:30, anchor.features = features)
+  
+  # Integrate dataset
+  seu_integrated <- IntegrateData(anchorset = anchors, dim = 1:30, k.weight = 50)
+  
+  DefaultAssay(seu_integrated) <- "integrated"
+  seu_integrated <- ScaleData(seu_integrated, verbose = FALSE)
+  seu_integrated <- RunPCA(seu_integrated, npcs=100, ndims.print = 1:5, nfeatures.print = 5)
+  # seu_integrated <- FindNeighbors(seu_integrated, reduction = "pca", dims = 1:75, nn.eps = 0.5)
+  # for(i in c(seq(0.1,1,0.1), 1.5, 2, 2.5, 3, 5, 10)) {
+  #   seu_integrated<-FindClusters(seu, resolution = i, n.start=10)}
+  # seu_integrated <- RunTSNE(seu_integrated, dims = 1:75, tsne.method = "Rtsne", 
+  # nthreads = 16, max_iter = 2000, check_duplicates = FALSE)
+  seu_integrated <- RunUMAP(seu_integrated, dims = 1:75, min.dist = 0.75)
+  
+  # Integrated UMAP visualization according to variables
+  # clusters
+  DimPlot(seu_integrated, reduction = "integrated_dr", label = FALSE)+
+    guides(color="none")+
+    theme(aspect.ratio=1)
+  # patient id
+  DimPlot(seu_integrated, reduction = "integrated_dr", group.by = "patient_id", 
+          label = F, label.box = T)+
+    theme(aspect.ratio=1)
+  # sample
+  DimPlot(seu_integrated, reduction = "integrated_dr", group.by = "sample", 
+          label = F, label.box = T)+
+    guides(color="none")+
+    theme(aspect.ratio=1)
+  # treatment
+  DimPlot(seu_integrated, reduction = "integrated_dr", group.by = "treatment_phase", 
+          label = F, label.box = T)+
+    theme(aspect.ratio=1)
+  # location
+  DimPlot(seu_integrated, reduction = "integrated_dr", 
+          group.by = "anatomical_location", label = F, label.box = T)+
+    theme(aspect.ratio=1)
+  # original annotation
+  DimPlot(seu_integrated, reduction = "integrated_dr", group.by = "cell_type", 
+          label = F, label.box = T)+
+    theme(aspect.ratio=1)
+  # patient id and treatment
+  DimPlot(seu_integrated, reduction = "integrated_dr", group.by = "patient_id", 
+          split.by = "treatment_phase", label = FALSE, label.box = T)+ 
+    theme(aspect.ratio=1)
+  # SAVE
+  # saveRDS(seu_integrated, "~/GSE165897_integrated.rds")
+}
+```
+
+# Annotation
+
+Given a dataset, we first import the processed seurat object as "seurat"
+
+```{r}
+if(0){
+  # Dataset: Zhang, 2022 - GSE165897
+  # seu <- readRDS("~/TFM-local/Seurat/GSE165897_processed.rds")
+}
+```
+
+## Original annotation
+
+As a guide, we will explore the original annotation from the authors, included
+in the Seurat object metadata
+
+```{r}
+if(0){
+  # Exploring annotation categories
+  colnames(seu@meta.data)
+  unique(seu$cell_type)
+  unique(seu$cell_subtype)
+  # Plotting UMAP with annotation
+  p1<-DimPlot(seu, group.by = "cell_type", label=T)+
+    guides(color="none")+
+    theme(aspect.ratio=1)
+  p2<-DimPlot(seu, group.by = "cell_subtype", label=T)+
+    guides(color="none")+
+    theme(aspect.ratio=1)
+  p1|p2
+}
+```
+
+## Automated annotation (from Satija's)
+
+As another way of exploration, we will also annotate our dataset, using the
+automated function by Satija's lab `Azimuth()`
+
+```{r}
+if(0){
+  # BiocManager::install(c("BSgenome.Hsapiens.UCSC.hg38", "EnsDb.Hsapiens.v86", 
+  # "TFBSTools"))
+  # devtools::install_github("satijalab/azimuth", dependencies = TRUE)
+  library(Azimuth)
+  # seu <- RunAzimuth(seu, reference = "pbmcref")
+  
+  # New "predicted.celltype" categories added to metadata
+  # head(seu@meta.data[,32:38],10)
+  
+  p1 <- DimPlot(seu, reduction = "umap", group.by = "predicted.celltype.l1", 
+                label = T, label.box = F)+
+    guides(color="none")+
+    theme(aspect.ratio = 1)
+  p2 <- DimPlot(seu, reduction = "umap", group.by = "predicted.celltype.l2", 
+                label = T, label.box = F)+
+    guides(color="none")+
+    theme(aspect.ratio = 1)
+  p3 <- DimPlot(seu, reduction = "umap", group.by = "predicted.celltype.l3", 
+                label = T, label.box = F)+   guides(color="none")+
+    theme(aspect.ratio = 1)
+  p1 | p2 | p3
+}
+```
+
+## Manual annotation
+
+We could also perform manual annotation according to lineage marker genes, such
+as PTPRC (encoding for CD45) for immune cells or EPCAM, PAX8 and WT1 for high-grade
+serous ovarian cancer cells.
+
+```{r}
+if(0){
+library(patchwork)
+p1<-DotPlot(seu, c("PTPRC","EPCAM","PAX8"))+coord_flip()+
+  theme(axis.text.x = element_text(angle=90, hjust=1, vjust=0.5, size=5))
+p1
+}
+```
+
+We can now compare the expression of this markers and check if it is overlapping
+with the original one.
+
+```{r}
+if(0){
+  p2<-DimPlot(seu, group.by = "cell_type", label=T)+
+    guides(color="none")+
+    theme(aspect.ratio=1)
+  p3<-FeaturePlot(seu, c("PTPRC","EPCAM","PAX8"))
+  p2 | p3
+}
+```
+
+# Downstream analysis
+
+```{r}
+```

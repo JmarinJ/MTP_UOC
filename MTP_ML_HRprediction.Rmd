@@ -1,0 +1,308 @@
+---
+title: "MTP: Machine-learning HR status prediction"
+output:
+  html_document:
+    toc: true
+    toc_depth: '3'
+    df_print: paged
+  pdf_document: default
+  word_document:
+    toc: true
+    toc_depth: 3
+date: "2025-01-10"
+editor_options:
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(knitr)
+# install.packages("factoextra")
+library(tibble)
+library(tidyverse)
+library(ggpubr)
+library(factoextra)
+library(class)
+# install.packages("gmodels")
+library(gmodels)
+# install.packages("caret")
+library(caret)
+# install.packages("e1071")
+library(e1071)
+# install.packages("reticulate")
+# install.packages("keras3")
+library(keras3)
+# install.packages("kernlab")
+library(kernlab)
+# install.packages("C50")
+library(C50)
+# install.packages("randomForest")
+library(randomForest)
+```
+
+## Dataset: Vazquez_22
+
+ML-classifier for HR prediction on Vázquez-García et al., 2022; using the significantly
+DE signatures (stored at sig_pred.rds).
+
+### Exploring the data
+
+```{r, fig.width=6, fig.height=4}
+collapsed_gsva <- readRDS("collapsed_gsv.rds")
+sig_pred<- readRDS("sig_pred.rds")
+# sig_pred<- readRDS("sig_pred2.rds")
+
+# Working matrix
+data <- collapsed_gsva %>% 
+  spread(sig, score) %>% 
+  column_to_rownames("Sample") %>% 
+  dplyr::select(mol, all_of(sig_pred))
+
+# Reading and exploring data
+# "mol" is the variable to predict
+names(data)
+kable(data[1:5,1:5])
+dim(data)
+
+# Variable description
+# str(data[,1:10])
+# summary(data[,1:10])
+
+# Check for missing values
+apply(is.na(data),2,sum)
+
+# Range of predictors
+range <- list()
+for(col in names(data)){
+  if (is.numeric(data[[col]])){
+    range[[col]]<-range(data[[col]])
+  }
+}
+print(range[1:6])
+
+# Factor and explore the variable of interest
+unique(data[,"mol"])
+data[,"mol"] <- factor(data[,"mol"], levels=c("HRD", "HRP"))
+table(data[,"mol"])
+prop.table(table(data[,"mol"]))
+
+# A priori differences of mean scoring between HR groups
+data %>% group_by(mol) %>% summarise_all(.funs = mean) %>% head() %>% 
+  pivot_longer(cols = -mol, names_to = "signature", values_to = "score") %>% 
+  pivot_wider(names_from = mol, values_from = score)
+
+# Boxplot representation of individual sample scores by signatures
+data %>% 
+  rownames_to_column("sample") %>% 
+  pivot_longer(cols = -c(mol, sample), names_to = "signature", values_to = "score") %>% 
+  ggplot(aes(signature, score, fill = mol))+
+  geom_boxplot(alpha=.5, outliers = FALSE)+
+  theme_bw()+
+  labs(fill="HR status", y="GSVA score", x=NULL)+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))+
+  scale_fill_manual(values = c("purple", "gold"))+
+  stat_compare_means(hide.ns = TRUE, label = "p.signif", label.y.npc = .9, color= "blue", size=4)
+
+## Principal component analysis
+data.pca <- prcomp(data[,-1])
+# Vector loadings of the first PCs
+head(data.pca$rotation[,1:5])
+summary(data.pca)
+
+# Contribution of PCs
+# scree plot
+library(factoextra)
+fviz_screeplot(data.pca, addlabels = TRUE, ylim = c(0,50))
+# Variable contribution
+fviz_pca_var(data.pca, col.var = "contrib")+
+  scale_color_gradient(low="blue", high="red")+
+  theme_minimal()
+
+# Representing according to 2 first PCs
+fviz_pca_ind(data.pca, geom.ind = "point", col.ind = data$mol, pointsize = 1, 
+             label = "none", addEllipses = TRUE, ellipse.level = 0.8)+
+  theme_bw()
+  
+```
+
+### Building our training and test datasets
+
+```{r}
+set.seed(111)
+n <- nrow(data)
+p <- 2/3
+
+# Creating the two subsets
+train <- sample(n,floor(n*p))
+data.train <- data[train,]
+data.test <- data[-train,]
+
+# Separate our variable of interest (y) and predictor variables (x)
+x.train <- data.train[,-1]
+x.test <- data.test[,-1]
+y.train <- data.train[,1]
+y.test <- data.test[,1]
+
+# Explore the proportion of HR groups in both subsets
+prop.table(table(data.train$mol))
+prop.table(table(data.test$mol))
+```
+
+## Prediction algorithms
+
+### k-Nearest Beighbours
+
+```{r}
+# Try different number of neighbours for the algorithm
+ks <- c(1,3,5,7,11,20,50)
+report <- data.frame(ks, Accuracy=NA, Kapp=NA, Lower_acc=NA, Upper_acc=NA)
+j <- 0
+for (i in ks){
+  j <- j+1
+  set.seed(123)
+  knn_pred <- knn(train = x.train, test=x.test, cl = y.train, k=i)
+  conf.mat <- confusionMatrix(knn_pred, y.test)
+  report[j,2:5]<-round(conf.mat$overall[1:4],3)
+}
+
+kable(report, 
+      col.names = c("k value", "Accuracy", "Kappa", "Lower acc.", "Upper acc."),
+      align = c("l", "c", "c", "c", "c"))
+
+set.seed(123)
+knn_pred <- knn(train = x.train, test=x.test, cl = y.train, k=20)
+conf.mat_knn <- confusionMatrix(knn_pred, y.test)
+conf.mat_knn
+```
+
+### Naïve Bayes
+
+```{r}
+# Laplace = 0
+set.seed(123)
+NB0_classifier <- naiveBayes(x.train, y.train, laplace=0)
+NB0_pred <- predict(NB0_classifier, x.test)
+confusionMatrix(NB0_pred, y.test)
+
+# Laplace = 1
+set.seed(123)
+NB1_classifier <- naiveBayes(x.train, y.train, laplace=1)
+NB1_pred <- predict(NB1_classifier, x.test)
+confusionMatrix(NB1_pred, y.test)
+
+# Don't see any improvement with Laplace = 1, so we stay with the first model
+conf.mat_nb0 <- confusionMatrix(NB0_pred, y.test)
+conf.mat_nb1 <-confusionMatrix(NB1_pred, y.test)
+
+```
+
+### Support Vector Machine
+
+```{r}
+set.seed(123)
+
+# Linear model
+svm.lineal<-ksvm(mol~., data=data.train, kernel="vanilladot")
+# Basic information of the model
+svm.lineal
+# Model evaluation
+svm_pred <- predict(svm.lineal, data.test)
+conf.mat_svm <- confusionMatrix(svm_pred, y.test)
+conf.mat_svm
+
+# Non-lineal model using radial basis function (rbf) kernel
+svm.rbf <- ksvm(mol~., data=data.train, kernel="rbfdot")
+# Basic information of the model
+svm.rbf
+# Model evaluation
+svm_pred.rbf <- predict(svm.rbf, data.test)
+conf.mat_svm.rbf <- confusionMatrix(svm_pred.rbf, y.test)
+conf.mat_svm.rbf 
+```
+
+### Decision trees
+
+```{r, fig.height=6, fig.width=10}
+set.seed(123)
+# Building the model
+c50 <- C5.0(x.train, y.train, trials=1, costs=NULL)
+c50
+summary(c50)
+# Plot the decision tree
+plot(c50)
+# Prediction
+c50_pred<-predict(c50, x.test)
+conf.mat_c50 <- confusionMatrix(c50_pred, y.test)
+conf.mat_c50
+
+# Applying boosting to the model
+c50_boost <- C5.0(x.train, y.train, trials=20, costs=NULL)
+c50_boost
+# summary(c50_boost)
+# Plot the decision tree
+plot(c50_boost)
+# Prediction
+c50_boost_pred<-predict(c50_boost, x.test)
+conf.mat_c50.boost <- confusionMatrix(c50_boost_pred, y.test)
+conf.mat_c50.boost
+```
+
+### Random Forest
+
+```{r}
+set.seed(123)
+# Building model with ntree=50
+rf50 <- randomForest(mol~., data = data.train, ntree = 50, mtru=sqrt(200))
+rf50
+plot(rf50)
+rf50_pred<-predict(rf50, x.test)
+conf.mat_rf50 <- confusionMatrix(y.test, rf50_pred)
+conf.mat_rf50
+
+# Getting information from the model of relevant predictors
+head(importance(rf50))
+varImpPlot(rf50)
+
+# Building model with ntree=100
+rf100 <- randomForest(mol~., data = data.train, ntree = 100, mtru=sqrt(200))
+rf100
+plot(rf100)
+rf100_pred<-predict(rf100, x.test)
+conf.mat_rf100 <- confusionMatrix(y.test, rf100_pred)
+conf.mat_rf100
+
+# Getting information from the model of relevant predictors
+head(importance(rf100))
+varImpPlot(rf100)
+
+# rf50 seems to perform better so 
+```
+
+## Summary of the ML classificators
+
+```{r}
+# Build a list witht the "conf.mat" from the implemented models.
+list_conf.mat<-list(conf.mat_knn, conf.mat_nb0, conf.mat_svm, conf.mat_svm.rbf, 
+                    conf.mat_c50, conf.mat_c50.boost, conf.mat_rf50, conf.mat_rf100)
+names(list_conf.mat) <- c("kNN (20)", "Naïve Bayes", "SVM (lineal)", "SVM (rbf)", 
+                          "Decision tree", "Decision tree (boosted)", 
+                          "Random forest (50)", "Random forest (100)")
+
+# Creamos la tabla resumen:
+resum <- data.frame()
+for (i in seq(list_conf.mat)) {
+  conf.mat <- list_conf.mat[[i]]
+  accuracy <- round(conf.mat$overall["Accuracy"],3)
+  kappa <- round(conf.mat$overall["Kappa"],3)
+  sensitivity <- round(conf.mat$byClass[1],3)
+  specificity <- round(conf.mat$byClass[2],3)
+  PPV <- round(conf.mat$byClass[3],3)
+  NPV <- round(conf.mat$byClass[4],3)
+  new <- data.frame(accuracy, kappa, sensitivity, specificity, PPV, NPV)
+  rownames(new) <- names(list_conf.mat)[i]
+  resum <- rbind(resum, new)
+}
+
+library(knitr)
+kable(resum)
+```
